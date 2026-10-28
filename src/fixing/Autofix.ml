@@ -16,8 +16,6 @@ open Common
 module OutJ = Semgrep_output_v1_t
 module Log = Log_fixing.Log
 
-let ( let/ ) = Result.bind
-
 (*****************************************************************************)
 (* Prelude *)
 (*****************************************************************************)
@@ -221,6 +219,7 @@ let ast_based_fix ~fix (start, end_) (pm : Pattern_match.t) : Textedit.t option
         parse_pattern lang fix_pattern
         |> Result.map_error (fun e ->
                spf "Failed to parse fix pattern:\n%s" (Exception.to_string e))
+        |> Result.join
       in
 
       (* Look through the fix pattern's AST and replace metavariables with the nodes to

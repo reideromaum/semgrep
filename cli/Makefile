@@ -31,7 +31,9 @@ check-markers:
 clean:
 	rm -rf build/ semgrep.egg-info/ .eggs/
 	rm -rf .pytest_cache/ .benchmarks/
-	rm -f cli/src/semgrep/bin/semgrep-core
+# clean also the semgrep-pro artifacts, not just semgrep-core
+	rm -f src/semgrep/bin/semgrep-core*
+	rm -f src/semgrep/bin/pro-installed-by.txt
 
 Pipfile.lock: setup.py
 	pipenv update
@@ -143,7 +145,7 @@ osemgrep-e2e:
 # coupling: this is run in CI in .github/workflows/tests.yml
 osempass:
 	PYTEST_USE_OSEMGREP=true $(PYTEST) -n auto \
-	  -m 'not osemfail' tests/default/e2e
+	  -m 'not osemfail' tests/default/e2e tests/default/e2e-other
 
 # to be used to discover tests that we should remove the osemfail pytest mark
 osempass-check-if-new-osempass:

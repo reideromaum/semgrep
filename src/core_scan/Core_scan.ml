@@ -18,9 +18,8 @@ module PM = Pattern_match
 module E = Core_error
 module MR = Mini_rule
 module R = Rule
-module RP = Core_result
 module In = Input_to_core_j
-module OutJ = Semgrep_output_v1_j
+module Out = Semgrep_output_v1_j
 
 (*****************************************************************************)
 (* Purpose *)
@@ -123,7 +122,7 @@ module OutJ = Semgrep_output_v1_j
 
 (* The type of the semgrep core scan. We define it here so that
    semgrep and semgrep-proprietary use the same definition *)
-type core_scan_func = Core_scan_config.t -> Core_result.result_or_exn
+type func = Core_scan_config.t -> Core_result.result_or_exn
 
 (* A target is [Not_scanned] when semgrep didn't find any applicable rules.
  * The information is useful to return to pysemgrep/osemgrep to
@@ -141,7 +140,7 @@ type was_scanned = Scanned of Fpath.t | Not_scanned
 
    Remember that a target handler runs in another process (via Parmap).
 *)
-type target_handler = Target.t -> RP.matches_single_file * was_scanned
+type target_handler = Target.t -> Core_result.matches_single_file * was_scanned
 
 (*****************************************************************************)
 (* Helpers *)
@@ -155,7 +154,11 @@ type target_handler = Target.t -> RP.matches_single_file * was_scanned
 let parse_and_resolve_name (lang : Lang.t) (fpath : Fpath.t) :
     AST_generic.program * Tok.location list =
   let { Parsing_result2.ast; skipped_tokens; _ } =
-    Parse_target.parse_and_resolve_name lang fpath
+    Logs_.with_debug_trace "Core_scan.parse_and_resolve_name" (fun () ->
+        Logs.debug (fun m ->
+            m "target: %s" !!fpath;
+            m "lang: %s" (Lang.to_string lang));
+        Parse_target.parse_and_resolve_name lang fpath)
   in
   (ast, skipped_tokens)
 
@@ -217,9 +220,9 @@ let sort_targets_by_decreasing_size (targets : Target.t list) : Target.t list =
  * early on.
  *)
 let filter_existing_targets (targets : Target.t list) :
-    Target.t list * OutJ.skipped_target list =
+    Target.t list * Out.skipped_target list =
   targets
-  |> Either_.partition_either (fun (target : Target.t) ->
+  |> Either_.partition (fun (target : Target.t) ->
          let internal_path = Target.internal_path target in
          if Sys.file_exists !!internal_path then Left target
          else
@@ -245,7 +248,8 @@ let filter_existing_targets (targets : Target.t list) :
                  })
 
 let set_matches_to_proprietary_origin_if_needed (xtarget : Xtarget.t)
-    (matches : RP.matches_single_file) : RP.matches_single_file =
+    (matches : Core_result.matches_single_file) :
+    Core_result.matches_single_file =
   (* If our target is a proprietary language, or we've been using the
    * proprietary engine, then label all the resulting matches with the Pro
    * engine kind. This can't really be done any later, because we need the
@@ -410,6 +414,11 @@ let map_targets ncores f (targets : Target.t list) =
      the two modes, we always sort the target queue in the same way.
   *)
   let targets = sort_targets_by_decreasing_size targets in
+  Logs.debug (fun m ->
+      let pp_sep f () = Format.pp_print_string f "\n\t" in
+      m "targets in processing order:%a"
+        (Format.pp_print_list ~pp_sep Target.pp_debug)
+        targets);
   if ncores <= 1 then List_.map f targets
   else (
     (*
@@ -504,12 +513,13 @@ let filter_files_with_too_many_matches_and_transform_as_timeout
            (* todo: we should maybe use a new error: TooManyMatches of int * string*)
            let loc = Tok.first_loc_of_file file in
            let error =
-             E.mk_error (Some id) loc
-               (spf
-                  "%d rules result in too many matches, most offending rule \
-                   has %d: %s"
-                  offending_rules cnt pat)
-               OutJ.TooManyMatches
+             E.mk_error ~rule_id:(Some id)
+               ~msg:
+                 (spf
+                    "%d rules result in too many matches, most offending rule \
+                     has %d: %s"
+                    offending_rules cnt pat)
+               loc Out.TooManyMatches
            in
            let skipped =
              sorted_offending_rules
@@ -542,26 +552,11 @@ let filter_files_with_too_many_matches_and_transform_as_timeout
 
 (* Convert invalid rules to errors to be reported at the end.
    This used to raise an exception causing an early abort.
-
    TODO: restore early abort but only in strict mode?
    TODO: report an error or not depending on the kind of problem?
 *)
-let errors_of_invalid_rule_errors (invalid_rules : Rule.invalid_rule_error list)
-    =
-  List_.map E.error_of_invalid_rule_error invalid_rules
-
-let sanity_check_invalid_patterns (res : Core_result.t) :
-    Core_result.result_or_exn =
-  match
-    res.errors
-    |> List.find_opt (function
-         | { Core_error.typ = OutJ.PatternParseError _; _ } -> true
-         | _else_ -> false)
-  with
-  | None -> Ok res
-  | Some err ->
-      let e = Exception.catch (Failure "Pattern parse error") in
-      Error (e, Some err)
+let errors_of_invalid_rules (invalid_rules : Rule_error.invalid_rule list) =
+  invalid_rules |> List_.map E.error_of_invalid_rule
 
 (*****************************************************************************)
 (* Parsing (non-cached) *)
@@ -569,7 +564,7 @@ let sanity_check_invalid_patterns (res : Core_result.t) :
 
 (* for -rules *)
 let rules_from_rule_source (caps : < Cap.tmp >) (config : Core_scan_config.t) :
-    Rule.t list * Rule.invalid_rule_error list =
+    Rule_error.rules_and_invalid =
   let rule_source =
     match config.rule_source with
     | Some (Core_scan_config.Rule_file file) ->
@@ -583,10 +578,15 @@ let rules_from_rule_source (caps : < Cap.tmp >) (config : Core_scan_config.t) :
   in
   let rules, rule_errors =
     match rule_source with
-    | Some (Core_scan_config.Rule_file file) ->
+    | Some (Core_scan_config.Rule_file file) -> (
         Logs.info (fun m -> m "Parsing %s" !!file);
         Logs.debug (fun m -> m " content = %s" (UFile.read_file file));
-        Parse_rule.parse_and_filter_invalid_rules ~rewrite_rule_ids:None file
+        match
+          Parse_rule.parse_and_filter_invalid_rules ~rewrite_rule_ids:None file
+        with
+        | Ok rules -> rules
+        | Error e ->
+            failwith ("Error in parsing: " ^ Rule_error.string_of_error e))
     | Some (Core_scan_config.Rules rules) -> (rules, [])
     | None ->
         (* TODO: ensure that this doesn't happen *)
@@ -619,11 +619,12 @@ let handle_target_with_trace handle_target t =
 *)
 let iter_targets_and_get_matches_and_exn_to_errors (config : Core_scan_config.t)
     (handle_target : target_handler) (targets : Target.t list) :
-    Core_profiling.file_profiling RP.match_result list * Fpath.t list =
+    Core_profiling.file_profiling Core_result.match_result list * Fpath.t list =
   (* The path in match_and_path_list is None when the file was not scanned *)
   let (match_and_path_list
-        : (Core_profiling.file_profiling RP.match_result * Fpath.t option) list)
-      =
+        : (Core_profiling.file_profiling Core_result.match_result
+          * Fpath.t option)
+          list) =
     targets
     |> map_targets config.ncores (fun (target : Target.t) ->
            let internal_path = Target.internal_path target in
@@ -631,6 +632,28 @@ let iter_targets_and_get_matches_and_exn_to_errors (config : Core_scan_config.t)
            Logs.debug (fun m ->
                m "Analyzing %s (contents in %s)" (Origin.to_string origin)
                  !!internal_path);
+
+           (* Sadly we need to disable tracing when we are using more than 1
+            * cores.
+            *
+            * The reason is that parmap forks new processes, and we occasionally
+            * run into a deadlock where the scan just freezes when we use tracing and
+            * multiprocesses together.
+            *
+            * Hopefully, Ocaml 5 with multithread support will resolve this issue.
+            * For now, just turn off tracing when we use more than 1 core.
+            *)
+           let handle_target_maybe_with_trace =
+             if config.ncores > 1 then (
+               Logs.debug (fun m ->
+                   m
+                     "Handling target without traces because multiprocessing \
+                      (%d jobs) was requested."
+                     config.ncores);
+               handle_target)
+             else handle_target_with_trace handle_target
+           in
+
            let (res, was_scanned), run_time =
              Common.with_time (fun () ->
                  try
@@ -657,7 +680,7 @@ let iter_targets_and_get_matches_and_exn_to_errors (config : Core_scan_config.t)
                         * old: timeout_function file config.timeout ...
                         *)
                        let res, was_scanned =
-                         handle_target_with_trace handle_target target
+                         handle_target_maybe_with_trace target
                        in
 
                        (* This is just to test -max_memory, to give a chance
@@ -708,16 +731,16 @@ let iter_targets_and_get_matches_and_exn_to_errors (config : Core_scan_config.t)
                               file *)
                            rule_ids
                            |> List_.map (fun error_rule_id ->
-                                  E.mk_error (Some error_rule_id) loc ""
-                                    OutJ.Timeout)
+                                  E.mk_error ~rule_id:(Some error_rule_id) loc
+                                    Out.Timeout)
                            |> E.ErrorSet.of_list
                        | Out_of_memory ->
                            Logs.warn (fun m ->
                                m "OutOfMemory on %s (contents in %s)"
                                  (Origin.to_string origin) !!internal_path);
                            E.ErrorSet.singleton
-                             (E.mk_error !Rule.last_matched_rule loc ""
-                                OutJ.OutOfMemory)
+                             (E.mk_error ~rule_id:!Rule.last_matched_rule loc
+                                Out.OutOfMemory)
                        | _ -> raise Impossible
                      in
                      ( Core_result.mk_match_result [] errors
@@ -732,30 +755,16 @@ let iter_targets_and_get_matches_and_exn_to_errors (config : Core_scan_config.t)
                  | Time_limit.Timeout _ ->
                      failwith
                        "Time limit exceeded (this shouldn't happen, FIXME)"
-                 (* It would be nice to detect 'R.Err (R.InvalidRule _)' here
-                  * for errors while parsing patterns. This exn used to be raised earlier
-                  * in sanity_check_rules_and_invalid_rules(), but after
-                  * the lazy parsing of patterns, those errors are raised
-                  * later. Unfortunately, we can't catch and reraise here, because
-                  * with -j 2, Parmap will just abort the whole thing and return
-                  * a different kind of exception to the caller. Instead, we
-                  * we need to convert all exns in errors (see the code further below),
-                  * and only in sanity_check_invalid_patterns() we can detect if one
-                  * of those errors was a PatternParseError.
-                  * does-not-work:
-                  * | R.Err (R.InvalidRule _) as exn when false ->
-                  *   Exception.catch_and_reraise exn
-                  *)
-                 (* convert all other exns (e.g., a parse error in a target file,
-                  * a parse error in a pattern), in an empty match result with errors,
-                  * so that one error in one target file or rule does not abort the whole
-                  * semgrep-core process.
+                 (* convert all other exns (e.g., a parse error in a target file)
+                  * in an empty match result with errors, so that one error in
+                  * one target file does not abort the whole scan and the
+                  * semgrep-core program.
                   *)
                  | exn when not !Flag_semgrep.fail_fast ->
                      let e = Exception.catch exn in
                      let errors =
                        Core_error.ErrorSet.singleton
-                         (E.exn_to_error None !!internal_path e)
+                         (E.exn_to_error None internal_path e)
                      in
                      ( Core_result.mk_match_result [] errors
                          (Core_profiling.empty_partial_profiling internal_path),
@@ -814,7 +823,7 @@ let target_of_input_to_core (input : In.target) : Target.t =
  * by using the include/exclude fields.).
  *)
 let targets_of_config (caps : < Cap.tmp >) (config : Core_scan_config.t) :
-    Target.t list * OutJ.skipped_target list =
+    Target.t list * Out.skipped_target list =
   match (config.target_source, config.roots, config.lang) with
   (* We usually let semgrep-python computes the list of targets (and pass it
    * via -target), but it's convenient to also run semgrep-core without
@@ -983,7 +992,8 @@ let mk_target_handler (config : Core_scan_config.t) (valid_rules : Rule.t list)
         | _ -> Scanned internal_path_to_content
       in
       (* TODO: run all the right hooks *)
-      (RP.collate_rule_results internal_path_to_content dep_matches, was_scanned)
+      ( Core_result.collate_rule_results internal_path_to_content dep_matches,
+        was_scanned )
   | Regular target ->
       let origin = target.path.origin in
       let file = target.path.internal_path_to_content in
@@ -1030,7 +1040,7 @@ let mk_target_handler (config : Core_scan_config.t) (valid_rules : Rule.t list)
         | Some lockfile_target ->
             applicable_rules
             |> Match_dependency.match_all_dependencies lockfile_target
-            |> Either_.partition_either (function
+            |> Either_.partition (function
                  | rule, Some [] -> Left rule
                  | x -> Right x)
       in
@@ -1056,21 +1066,13 @@ let mk_target_handler (config : Core_scan_config.t) (valid_rules : Rule.t list)
           * Note that this is run in a child process of Parmap, so
           * the hook should not rely on shared memory.
       *)
-      config.file_match_results_hook
-      |> Option.iter (fun hook -> hook file matches);
+      config.file_match_hook |> Option.iter (fun hook -> hook file matches);
       print_cli_progress config;
       (matches, was_scanned)
 
-(* This is the main function used by pysemgrep right now.
- * This is also now called from osemgrep.
- * It takes a set of rules and a set of targets and iteratively process those
- * targets.
- * coupling: If you modify this function, you probably need also to modify
- * Deep_scan.scan() in semgrep-pro which is mostly a copy-paste of this file.
- *)
-let scan ?match_hook (caps : < Cap.tmp >) config
+let scan_exn ?match_hook (caps : < Cap.tmp >) (config : Core_scan_config.t)
     ((valid_rules, invalid_rules), rules_parse_time) : Core_result.t =
-  let rule_errors = errors_of_invalid_rule_errors invalid_rules in
+  let rule_errors = errors_of_invalid_rules invalid_rules in
 
   (* The basic targets *)
   let basic_targets, skipped = targets_of_config caps config in
@@ -1132,8 +1134,8 @@ let scan ?match_hook (caps : < Cap.tmp >) config
   (* Since the OSS engine was invoked, there were no interfile languages
      requested *)
   let interfile_languages_used = [] in
-  let res =
-    RP.make_final_result file_results
+  let (res : Core_result.t) =
+    Core_result.mk_result file_results
       (List_.map (fun r -> (r, `OSS)) valid_rules)
       invalid_rules scanned interfile_languages_used ~rules_parse_time
   in
@@ -1171,8 +1173,15 @@ let scan ?match_hook (caps : < Cap.tmp >) config
 (* Entry point *)
 (*****************************************************************************)
 
-let scan_with_exn_handler ?match_hook (caps : < Cap.tmp >)
-    (config : Core_scan_config.t) : Core_result.result_or_exn =
+(* This is the main function used by pysemgrep right now.
+ * This is also now called from osemgrep.
+ * It takes a set of rules and a set of targets and iteratively process those
+ * targets.
+ * coupling: If you modify this function, you probably need also to modify
+ * Deep_scan.scan() in semgrep-pro which is mostly a copy-paste of this file.
+ *)
+let scan ?match_hook (caps : < Cap.tmp >) (config : Core_scan_config.t) :
+    Core_result.result_or_exn =
   try
     let timed_rules =
       Common.with_time (fun () -> rules_from_rule_source caps config)
@@ -1182,14 +1191,13 @@ let scan_with_exn_handler ?match_hook (caps : < Cap.tmp >)
        and nosemgrep post processors in OSS; it is easy to
        hook any pre or post processing step that needs to look at rules and
        results. *)
-    let res =
-      Pre_post_core_scan.call_with_pre_and_post_processor Fun.id
-        (scan ?match_hook caps) config timed_rules
-    in
-    sanity_check_invalid_patterns res
+    Ok
+      (Pre_post_core_scan.call_with_pre_and_post_processor Fun.id
+         (scan_exn ?match_hook caps)
+         config timed_rules)
   with
   | exn when not !Flag_semgrep.fail_fast ->
       let e = Exception.catch exn in
       Logs.err (fun m ->
-          m "Uncaught exn in scan_with_exn_handler: %s" (Exception.to_string e));
-      Error (e, None)
+          m "Uncaught exn in Core_scan.scan: %s" (Exception.to_string e));
+      Error e

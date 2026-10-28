@@ -93,7 +93,6 @@ all:
 # OCaml compilation
 	$(MAKE) core
 	$(MAKE) copy-core-for-cli
-	$(MAKE) build-semgrep-jsoo
 # Python setup
 	cd cli && pipenv install --dev
 	$(MAKE) -C cli build
@@ -151,16 +150,6 @@ build-pfff:
 .PHONY: build-parse-cairo
 build-parse-cairo:
 	dune build $(BUILD)/install/default/bin/parse-cairo
-
-# This takes a long time
-.PHONY: build-semgrep-jsoo
-build-semgrep-jsoo:
-	dune build js --profile=release
-
-# Build Semgrep JS w/debug symbols, no mangling and source maps
-.PHONY: build-semgrep-jsoo-debug
-build-semgrep-jsoo-debug:
-	dune build js --profile=dev
 
 # Remove from the project tree everything that's not under source control
 # and was not created by 'make setup'.
@@ -244,9 +233,17 @@ core-test-e2e:
 	$(MAKE) -C interfaces/semgrep_interfaces test
 	python3 tests/semgrep-core-e2e/test_target_file.py
 
-.PHONY: test-jsoo
-test-jsoo: build-semgrep-jsoo-debug
-	$(MAKE) -C js test
+# Run all the tests for JavaScript Semgrep
+.PHONY: test-js
+test-js: build-js
+	$(MAKE) test-js-no-dune
+
+# The CI job is currently split into two jobs. This runs in the second
+# job that doesn't have access to dune, so we can't make target this depend
+# on the 'build-js' target.
+.PHONY: test-js-no-dune
+test-js-no-dune:
+	$(MAKE) -C js test -j `nproc`
 
 # Test the compatibility with the main branch of semgrep-proprietary
 # in a separate work tree.
@@ -363,10 +360,6 @@ ALPINE_APK_DEPS_CORE=\
   openssl-libs-static \
   zlib-static
 
-# Here is why we need those external packages below for pysemgrep:
-# - python3: obviously needed for pysemgrep and our e2e tests
-ALPINE_APK_DEPS_PYSEMGREP=python3
-
 # Here is why we need those external packages:
 # - pkg-config?
 # NOTE: libpcre3 is actually libpcre
@@ -424,17 +417,6 @@ install-deps-ALPINE-for-semgrep-core:
 	apk add $(ALPINE_APK_DEPS_CORE)
 # Look at its top comment for why it's necessary
 	./scripts/build-static-libcurl.sh
-
-# We pin to a specific version just to prevent things from breaking randomly.
-# We could update to a more recent version.
-# coupling: if you modify the version, please modify also .github/workflows/*
-PIPENV='pipenv==2022.6.7'
-
-# For '--ignore-installed distlib' below see
-# https://stackoverflow.com/questions/63515454/why-does-pip3-install-pipenv-give-error-error-cannot-uninstall-distlib
-install-deps-ALPINE-for-pysemgrep:
-	apk add --no-cache $(ALPINE_APK_DEPS_PYSEMGREP)
-	pip install --no-cache-dir --ignore-installed distlib $(PIPENV)
 
 # -------------------------------------------------
 # Ubuntu

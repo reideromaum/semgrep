@@ -21,7 +21,7 @@ open RPC_server
 module CN = Client_notification
 module CR = Client_request
 module Conv = Convert_utils
-module OutJ = Semgrep_output_v1_t
+module Out = Semgrep_output_v1_t
 
 (*****************************************************************************)
 (* Helpers *)
@@ -82,7 +82,7 @@ let run_semgrep ?(targets : Fpath.t list option) ?rules ?git_ref
         (* This is currently just ripped from Scan_subcommand. *)
         let core_run_func =
           let pro_intrafile = session.user_settings.pro_intrafile in
-          match !Core_runner.hook_pro_core_run_for_osemgrep with
+          match !Core_runner.hook_mk_pro_core_run_for_osemgrep with
           | Some pro_scan_func when pro_intrafile ->
               (* THINK: files or folders?
                  Note that converting many target files to scanning roots
@@ -94,21 +94,26 @@ let run_semgrep ?(targets : Fpath.t list option) ?rules ?git_ref
               let roots = List_.map Scanning_root.of_fpath targets in
               (* For now, we're going to just hard-code it at a whole scan, and
                  using the intrafile pro engine.
-                 Interfile would likely be too intensive (and require us to target
-                 folders, not the affected files)
+                 Interfile would likely be too intensive (and require us to
+                 target folders, not the affected files)
               *)
-              let diff_config = Differential_scan_config.WholeScan in
-              pro_scan_func ~diff_config ~roots
-                Engine_type.(
-                  PRO
-                    {
-                      (* TODO: this probably needs better product detection. *)
-                      extra_languages = true;
-                      analysis = Interprocedural;
-                      secrets_config = None;
-                      code_config = Some ();
-                      supply_chain_config = None;
-                    })
+              pro_scan_func
+                {
+                  roots;
+                  diff_config = Differential_scan_config.WholeScan;
+                  engine_type =
+                    Engine_type.(
+                      PRO
+                        {
+                          (* TODO: this probably needs better product detection. *)
+                          extra_languages = true;
+                          analysis = Interprocedural;
+                          secrets_config = None;
+                          code_config = Some ();
+                          supply_chain_config = None;
+                          path_sensitive = false;
+                        });
+                }
           | _ ->
               (* TODO: improve this error message depending on what the
                * instructions should be *)
@@ -119,21 +124,21 @@ let run_semgrep ?(targets : Fpath.t list option) ?rules ?git_ref
                    You may need to acquire a different binary."
                 |> ignore;
               Core_runner.mk_core_run_for_osemgrep
-                (Core_scan.scan_with_exn_handler (session.caps :> < Cap.tmp >))
+                (Core_scan.scan (session.caps :> < Cap.tmp >))
         in
         Logs.debug (fun m ->
             m "Running Semgrep with %d rules" (List.length rules));
         let res_or_exn =
           (fun () ->
-            core_run_func.run ~file_match_results_hook:None runner_conf
-              Find_targets.default_conf rules [] targets)
+            core_run_func.run ~file_match_hook:None runner_conf
+              Find_targets.default_conf (rules, []) targets)
           |> Profiler.record profiler ~name:"core_run"
         in
         match res_or_exn with
-        | Error (exn, _core_error_opt) ->
+        | Error exn ->
             (* TODO? should this just be logged instead *)
             Exception.reraise exn
-        | Ok res -> Core_runner.create_core_result rules res
+        | Ok res -> Core_runner.mk_result rules res
       in
       (* Collect results. *)
       let scanned = res.scanned |> Set_.elements in
@@ -148,10 +153,12 @@ let run_semgrep ?(targets : Fpath.t list option) ?rules ?git_ref
         |> Profiler.record profiler ~name:"process_run"
       in
       (* Do reporting *)
-      let cli_output = Output.preprocess_result Output.default res in
+      let (cli_output : Out.cli_output) =
+        Output.preprocess_result ~fixed_lines:false res
+      in
       let errors =
         cli_output.errors
-        |> List_.filter_map (fun (e : OutJ.cli_error) -> e.message)
+        |> List_.filter_map (fun (e : Out.cli_error) -> e.message)
         |> String.concat "\n"
       in
       Logs.app (fun m -> m "Semgrep errors: %s" errors);
@@ -277,7 +284,7 @@ let scan_file server uri =
     let targets = if List.mem file session_targets then targets else [] in
     let results, _ = run_semgrep ~targets server in
     let results =
-      List_.map (fun (m : OutJ.cli_match) -> { m with path = file }) results
+      List_.map (fun (m : Out.cli_match) -> { m with path = file }) results
     in
     let files = [ file ] in
     Session.record_results server.session results files;
