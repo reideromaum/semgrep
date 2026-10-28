@@ -6,6 +6,104 @@
 
 <!-- insertion point -->
 
+## [1.81.0](https://github.com/returntocorp/semgrep/releases/tag/v1.81.0) - 2024-07-24
+
+
+### Changed
+
+
+- The --debug option will now display logging information from the semgrep-core
+  binary directly, without waiting that the semgrep-core program finish. (incremental_debug)
+
+
+### Fixed
+
+
+- C++: Scanning a project with header files (.h) now no longer causes a
+  spurious warnings that the file is being skipped, or not analyzed. (code-6899)
+- Semgrep will now be more strict (as it should be) when unifying identifiers.
+
+  Patterns like the one below may not longer work, particularly in Semgrep Pro:
+
+      patterns:
+        - pattern-inside: |
+            class A:
+              ...
+              def $F(...):
+                ...
+              ...
+            ...
+        - pattern-inside: |
+            class B:
+              ...
+              def $F(...):
+                ...
+              ...
+            ...
+
+  Even if two classes `A` and `B` may both have a method named `foo`, these methods
+  are not the same, and their ids are not unifiable via `$F`. The right way of doing
+  this in Semgrep is the following:
+
+      patterns:
+        - pattern-inside: |
+            class A:
+              ...
+              def $F1(...):
+                ...
+              ...
+            ...
+        - pattern-inside: |
+            class B:
+              ...
+              def $F2(...):
+                ...
+              ...
+            ...
+        - metavariable-comparison:
+            comparison: str($F1) == str($F2)
+
+  We use a different metavariable to match each method, then we check whether they
+  have the same name (i.e., same string). (code-7336)
+- In the app, you can configure Secrets ignores separately from Code/SSC ignores. However, the
+  files that were ignored by Code/SSC and not Secrets were still being scanned during the
+  preprocessing stage for interfile analysis. This caused significantly longer scan times than
+  expected for some users, since those ignored files can ignore library code. This PR fixes that
+  behavior and makes Code/SSC ignores apply as expected. (saf-1087)
+- Fixed typo that prevented users from using "--junit-xml-output" flag and added a tests that invokes the flag. (saf-1437)
+
+
+## [1.80.0](https://github.com/returntocorp/semgrep/releases/tag/v1.80.0) - 2024-07-18
+
+
+### Added
+
+
+- OSemgrep now can take `--exclude-minified-files` to skip  minified files. Additionally `--no-exclude-minified-files` will disable this option. It is off by default. (cdx-460)
+- Users are now required to login before using semgrep scan --pro.
+
+  Previously, semgrep will tell the users to log in, but the scan will still continue.
+
+  With this change, semgrep will tell the users to log in and stop the scan. (saf-1137)
+
+
+### Fixed
+
+
+- The language server no longer scans large or minified files (cdx-460)
+- Pro: Improved module resolution for Python. Imports like `from a.b import c` where
+  `c` is a module will now be resolved by Semgrep. And, if a module cannot be found
+  in the search path, Semgrep will try to heuristically resolve the module by matching
+  the module specifier against the files that are being scanned. (code-7069)
+- A scan can occasionally freeze when using tracing with multiprocesses.
+
+  This change disables tracing when scanning each target file unless the scan runs in a single process. (saf-1143)
+- Improved error handling for rules with invalid patterns. Now, scans will still complete and findings from other rules will be reported. (saf-789)
+- The "package-lock.json" parser incorrectly assumed that all paths in the "packages" component of "package-lock.json" started with "node_modules/".
+
+  In reality, a dependency can be installed anywhere, so the parser was made more flexible to recognize alternative locations ("node_modules", "lib", etc). (sc-1576)
+
+
 ## [1.79.0](https://github.com/returntocorp/semgrep/releases/tag/v1.79.0) - 2024-07-10
 
 
@@ -171,7 +269,8 @@
 
 ### Fixed
 
-
+- The min-version/max-version rule filtering is now done in pysemgrep too,
+  avoiding previous crash when using new fields (or new enums) in a rule.
 - Language Server will now send error messages properly, and error handling is greatly improved (cdx-502)
 - Pro: Calling a safe method on a tainted object should no longer propagate taint.
 

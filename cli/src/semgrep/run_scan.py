@@ -10,6 +10,7 @@
 # file when we introduced semgrep commands (e.g., scan, login). This file
 # is now called from commands/scan.py and commands/ci.py instead.
 # old: this file used to be called semgrep_main.py
+#
 import json
 import time
 from io import StringIO
@@ -35,13 +36,13 @@ import semgrep.semgrep_interfaces.semgrep_output_v1 as out
 from semdep.parse_lockfile import parse_lockfile_path
 from semdep.parsers.util import DependencyParserError
 from semgrep import __VERSION__
+from semgrep import tracing
 from semgrep.autofix import apply_fixes
 from semgrep.config_resolver import get_config
 from semgrep.constants import DEFAULT_DIFF_DEPTH
 from semgrep.constants import DEFAULT_TIMEOUT
 from semgrep.constants import OutputFormat
 from semgrep.core_runner import CoreRunner
-from semgrep.core_runner import get_contributions
 from semgrep.core_runner import Plan
 from semgrep.engine import EngineType
 from semgrep.error import FilesNotFoundError
@@ -82,7 +83,6 @@ from semgrep.target_manager import TargetManager
 from semgrep.target_mode import TargetModeConfig
 from semgrep.util import unit_str
 from semgrep.verbose_logging import getLogger
-
 
 logger = getLogger(__name__)
 
@@ -171,6 +171,7 @@ def remove_matches_in_baseline(
 
 
 # This runs semgrep-core (and also handles SCA and join rules)
+@tracing.trace()
 def run_rules(
     filtered_rules: List[Rule],
     target_manager: TargetManager,
@@ -335,6 +336,7 @@ def list_targets_and_exit(target_manager: TargetManager, product: out.Product) -
 
 # cli/bin/semgrep -> main.py -> cli.py -> commands/scan.py -> run_scan()
 # old: this used to be called semgrep.semgrep_main.main
+@tracing.trace()
 def run_scan(
     *,
     diff_depth: int = DEFAULT_DIFF_DEPTH,
@@ -377,8 +379,9 @@ def run_scan(
     optimizations: str = "none",
     baseline_commit: Optional[str] = None,
     baseline_commit_is_mergebase: bool = False,
-    dump_contributions: bool = False,
     x_ls: bool = False,
+    path_sensitive: bool = False,
+    capture_core_stderr: bool = True,
 ) -> Tuple[
     RuleMatchMap,
     List[SemgrepError],
@@ -390,7 +393,6 @@ def run_scan(
     Collection[out.MatchSeverity],
     Dict[str, List[FoundDependency]],
     List[DependencyParserError],
-    out.Contributions,
     int,  # Executed Rule Count
     int,  # Missed Rule Count
 ]:
@@ -565,15 +567,12 @@ def run_scan(
         timeout_threshold=timeout_threshold,
         trace=trace,
         trace_endpoint=trace_endpoint,
+        capture_stderr=capture_core_stderr,
         optimizations=optimizations,
         allow_untrusted_validators=allow_untrusted_validators,
         respect_rule_paths=respect_rule_paths,
+        path_sensitive=path_sensitive,
     )
-
-    if dump_contributions:
-        contributions = get_contributions(engine_type)
-    else:
-        contributions = out.Contributions([])
 
     experimental_rules, unexperimental_rules = partition(
         filtered_rules, lambda rule: (isinstance(rule.severity.value, out.Experiment))
@@ -772,7 +771,6 @@ def run_scan(
         shown_severities,
         dependencies,
         dependency_parser_errors,
-        contributions,
         executed_rule_count,
         missed_rule_count,
     )
@@ -808,7 +806,6 @@ def run_scan_and_return_json(
         profiler,
         output_extra,
         shown_severities,
-        _,
         _,
         _,
         _,

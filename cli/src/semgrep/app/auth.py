@@ -4,11 +4,13 @@ from typing import Optional
 
 from boltons.iterutils import get_path
 
+from semgrep import tracing
 from semgrep.state import get_state
 
 logger = logging.getLogger(__name__)
 
 
+@tracing.trace()
 def get_deployment_from_token(token: str) -> Optional[str]:
     """
     Returns the deployment name the token is for, if token is valid
@@ -82,15 +84,6 @@ def set_token(token: str) -> None:
     logger.debug("Saving API token in settings file")
     settings = get_state().settings
     settings.set("api_token", token)
-
-
-def delete_token() -> None:
-    """
-    Remove api token from settings file
-    """
-    logger.debug("Deleting api token from settings file")
-    settings = get_state().settings
-    settings.delete("api_token")
 
 
 def is_a_tty() -> bool:
