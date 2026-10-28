@@ -1,8 +1,4 @@
-(*****************************************************************************)
-(* API *)
-(*****************************************************************************)
-
-let partition f l =
+let partition_result f l =
   let rec aux left right = function
     | [] -> (List.rev left, List.rev right)
     | x :: l -> (

@@ -136,3 +136,10 @@ val location : t -> loc
 val location2 : t -> t -> loc
 val range : loc -> loc -> loc
 val dummy_loc : loc
+
+(***************************************************************************)
+(* AST dump *)
+(***************************************************************************)
+
+(* Show the general structure of the AST. *)
+val print : t -> unit

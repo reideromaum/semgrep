@@ -324,7 +324,6 @@ let transfer :
     | Enter
     | Exit
     | Join
-    | OtherJoin
     | NCond _
     | NGoto _
     | NReturn _

@@ -34,15 +34,6 @@ let profile_mini_rules = ref false
  * the expr/stmt/... visitor, while generic_vs_generic does the matching.
  *)
 
-(* environment of stuff common to each matcher *)
-type env = {
-  m_env : MG.tin;
-  path : Target.path;
-  hook : PM.t -> unit;
-  matches : PM.t Stack_.t;
-  has_as_metavariable : bool;
-}
-
 (*****************************************************************************)
 (* Debugging *)
 (*****************************************************************************)
@@ -149,9 +140,7 @@ let (rule_id_of_mini_rule : Mini_rule.t -> Pattern_match.rule_id) =
     langs = mr.langs;
   }
 
-let match_rules_and_recurse
-    ({ m_env; path; hook; matches; has_as_metavariable } : env) rules matcher k
-    any x =
+let match_rules_and_recurse m_env path hook matches rules matcher k any x =
   rules
   |> List.iter (fun (pattern, rule) ->
          let matches_with_env = matcher rule pattern x m_env in
@@ -178,9 +167,7 @@ let match_rules_and_recurse
                           path;
                           env = mv;
                           range_loc;
-                          (* as-metavariable: *)
-                          ast_node =
-                            (if has_as_metavariable then Some (any x) else None);
+                          ast_node = Some (any x);
                           tokens;
                           taint_trace = None;
                           (* This will be overrided later on by the Pro engine, if this is
@@ -299,9 +286,8 @@ let get_facts_of_stmt stmt =
  * matching expressions unless they fall in specific regions of the code.
  * See also docs for {!check} in Match_pattern.mli.
  *)
-let check ~hook ?(has_as_metavariable = false) ?(mvar_context = None)
-    ?(range_filter = fun _ -> true) (config, equivs) rules
-    (internal_path_to_content, origin, lang, ast) =
+let check ~hook ?(mvar_context = None) ?(range_filter = fun _ -> true)
+    (config, equivs) rules (internal_path_to_content, origin, lang, ast) =
   Log.info (fun m ->
       m "checking %s with %d mini rules" !!internal_path_to_content
         (List.length rules));
@@ -396,12 +382,6 @@ let check ~hook ?(has_as_metavariable = false) ?(mvar_context = None)
                   patterns are supported");
     let path : Target.path = { internal_path_to_content; origin } in
 
-    (* or "Match_patterns" env, which is the environment of collecting all
-       stuff which is common to each `match_rules_and_recurse`
-       this makes it easier to get information to each call
-    *)
-    let mp_env = { m_env; path; hook; matches; has_as_metavariable } in
-
     let visitor =
       object (_self : 'self)
         inherit [_] Matching_visitor.matching_visitor as super
@@ -444,10 +424,7 @@ let check ~hook ?(has_as_metavariable = false) ?(mvar_context = None)
                                   path;
                                   env = mv;
                                   range_loc;
-                                  (* as-metavariable: *)
-                                  ast_node =
-                                    (if has_as_metavariable then Some (E x)
-                                     else None);
+                                  ast_node = Some (E x);
                                   tokens;
                                   taint_trace = None;
                                   engine_of_match = `OSS;
@@ -516,10 +493,7 @@ let check ~hook ?(has_as_metavariable = false) ?(mvar_context = None)
                                     path;
                                     env = mv;
                                     range_loc;
-                                    (* as-metavariable: *)
-                                    ast_node =
-                                      (if has_as_metavariable then Some (S x)
-                                       else None);
+                                    ast_node = Some (S x);
                                     tokens;
                                     taint_trace = None;
                                     engine_of_match = `OSS;
@@ -572,11 +546,7 @@ let check ~hook ?(has_as_metavariable = false) ?(mvar_context = None)
                                       path;
                                       env = mv;
                                       range_loc;
-                                      (* as-metavariable: *)
-                                      ast_node =
-                                        (if has_as_metavariable then
-                                           Some (Ss matched)
-                                         else None);
+                                      ast_node = Some (Ss matched);
                                       tokens;
                                       taint_trace = None;
                                       engine_of_match = `OSS;
@@ -593,33 +563,34 @@ let check ~hook ?(has_as_metavariable = false) ?(mvar_context = None)
           super#v_stmts env x
 
         method! visit_type_ env x =
-          match_rules_and_recurse mp_env !type_rules match_t_t
+          match_rules_and_recurse m_env path hook matches !type_rules match_t_t
             (super#visit_type_ env)
             (fun x -> T x)
             x
 
         method! visit_pattern env x =
-          match_rules_and_recurse mp_env !pattern_rules match_p_p
-            (super#visit_pattern env)
+          match_rules_and_recurse m_env path hook matches !pattern_rules
+            match_p_p (super#visit_pattern env)
             (fun x -> P x)
             x
 
         method! visit_attribute env x =
-          match_rules_and_recurse mp_env !attribute_rules match_at_at
+          match_rules_and_recurse m_env path hook matches !attribute_rules
+            match_at_at
             (super#visit_attribute env)
             (fun x -> At x)
             x
 
         method! visit_xml_attribute env x =
-          match_rules_and_recurse mp_env !xml_attribute_rules
+          match_rules_and_recurse m_env path hook matches !xml_attribute_rules
             match_xml_attribute_xml_attribute
             (super#visit_xml_attribute env)
             (fun x -> XmlAt x)
             x
 
         method! visit_field env x =
-          match_rules_and_recurse mp_env !fld_rules match_fld_fld
-            (super#visit_field env)
+          match_rules_and_recurse m_env path hook matches !fld_rules
+            match_fld_fld (super#visit_field env)
             (fun x -> Fld x)
             x
 
@@ -674,11 +645,7 @@ let check ~hook ?(has_as_metavariable = false) ?(mvar_context = None)
                                       path;
                                       env = mv;
                                       range_loc;
-                                      (* as-metavariable: *)
-                                      ast_node =
-                                        (if has_as_metavariable then
-                                           Some (Ss matched)
-                                         else None);
+                                      ast_node = Some (Ss matched);
                                       tokens;
                                       taint_trace = None;
                                       engine_of_match = `OSS;
@@ -692,26 +659,27 @@ let check ~hook ?(has_as_metavariable = false) ?(mvar_context = None)
                                   in
                                   Stack_.push pm matches;
                                   hook pm)));
-          match_rules_and_recurse mp_env !flds_rules match_flds_flds
-            (super#v_fields env)
+          match_rules_and_recurse m_env path hook matches !flds_rules
+            match_flds_flds (super#v_fields env)
             (fun x -> Flds x)
             x
 
         method! v_partial ~recurse env x =
-          match_rules_and_recurse mp_env !partial_rules match_partial_partial
+          match_rules_and_recurse m_env path hook matches !partial_rules
+            match_partial_partial
             (super#v_partial ~recurse env)
             (fun x -> Partial x)
             x
 
         method! visit_name env x =
-          match_rules_and_recurse mp_env !name_rules match_name_name
-            (super#visit_name env)
+          match_rules_and_recurse m_env path hook matches !name_rules
+            match_name_name (super#visit_name env)
             (fun x -> Name x)
             x
 
         method! visit_raw_tree env x =
-          match_rules_and_recurse mp_env !raw_rules match_raw_raw
-            (super#visit_raw_tree env)
+          match_rules_and_recurse m_env path hook matches !raw_rules
+            match_raw_raw (super#visit_raw_tree env)
             (fun x -> Raw x)
             x
       end

@@ -1,4 +1,3 @@
-open Common
 open Fpath_.Operators
 
 (*****************************************************************************)
@@ -29,6 +28,8 @@ let default_settings =
 (* Helpers *)
 (*****************************************************************************)
 
+let ( let* ) = Result.bind
+
 (* TODO: we should just use ATD to automatically read the settings.yml
    file by converting it first to json and then use ATDgen API *)
 let of_yaml = function
@@ -37,14 +38,14 @@ let of_yaml = function
         List.assoc_opt "has_shown_metrics_notification" data
       and api_token = List.assoc_opt "api_token" data
       and anonymous_user_id = List.assoc_opt "anonymous_user_id" data in
-      let/ has_shown_metrics_notification =
+      let* has_shown_metrics_notification =
         Option.fold ~none:(Ok None)
           ~some:(function
             | `Bool b -> Ok (Some b)
             | _else -> Error (`Msg "has shown metrics notification not a bool"))
           has_shown_metrics_notification
       in
-      let/ api_token =
+      let* api_token =
         Option.fold ~none:(Ok None)
           ~some:(function
             | `String s ->
@@ -53,7 +54,7 @@ let of_yaml = function
             | _else -> Error (`Msg "api token not a string"))
           api_token
       in
-      let/ anonymous_user_id =
+      let* anonymous_user_id =
         Option.fold
           ~none:(Error (`Msg "no anonymous user id"))
           ~some:(function
@@ -80,35 +81,20 @@ let to_yaml { has_shown_metrics_notification; api_token; anonymous_user_id } =
 (* Entry points *)
 (*****************************************************************************)
 
-let set_api_token ~include_env settings =
-  if include_env then
-    match !Semgrep_envvars.v.app_token with
-    | Some token -> { settings with api_token = Some token }
-    | None -> settings
-  else settings
-
-(*
-   Return 'None' if the settings file can't be loaded. The 'settings'
-   record need to be completed with the 'set_api_token'.
-*)
-let load_opt ?(maturity = Maturity.Default) ?(include_env = true) () =
+let load ?(maturity = Maturity.Default) ?(include_env = true) () =
   let settings = !Semgrep_envvars.v.user_settings_file in
   Logs.info (fun m -> m "Loading settings from %s" !!settings);
   try
-    if
-      Sys.file_exists !!settings
-      && Unix.(stat !!settings).st_kind =*= Unix.S_REG
+    if Sys.file_exists !!settings && Unix.(stat !!settings).st_kind = Unix.S_REG
     then
       let data = UFile.read_file settings in
-      let opt_settings =
+      let decoded =
         match Yaml.of_string data with
-        | Error (`Msg msg) ->
+        | Error _ ->
             Logs.warn (fun m ->
-                m
-                  "Bad settings format; %s will be overriden. Contents:\n\
-                   %s\n\
-                   Decode error: %s" !!settings data msg);
-            None
+                m "Bad settings format; %s will be overriden. Contents:\n%s"
+                  !!settings data);
+            default_settings
         | Ok value -> (
             match of_yaml value with
             | Error (`Msg msg) ->
@@ -117,44 +103,27 @@ let load_opt ?(maturity = Maturity.Default) ?(include_env = true) () =
                       "Bad settings format; %s will be overriden. Contents:\n\
                        %s\n\
                        Decode error: %s" !!settings data msg);
-                None
-            | Ok settings -> Some settings)
+                default_settings
+            | Ok s -> s)
       in
-      (* TODO: explain why we set the api_token field from the environment
-         variable only in the case of some failures but not in case of
-         an exception. *)
       let settings =
-        match opt_settings with
-        | None -> default_settings
-        | Some settings -> settings
+        if include_env then
+          match !Semgrep_envvars.v.app_token with
+          | Some token -> { decoded with api_token = Some token }
+          | None -> decoded
+        else decoded
       in
-      Some (set_api_token ~include_env settings)
+      settings
     else (
       (match maturity with
       | Maturity.Develop ->
           Logs.warn (fun m ->
-              m "Settings file '%s' does not exist or is not a regular file"
+              m "Settings file %s does not exist or is not a regular file"
                 !!settings)
-      | Default
-      | Legacy
-      | Experimental ->
-          (* We used to log nothing here. Why not log the same message
-             at all maturity levels? Either way, we should always log
-             error messages somewhere, never ignore them. *)
-          Logs.info (fun m ->
-              m "Settings file '%s' does not exist or is not a regular file"
-                !!settings));
-      None)
+      | _else_ -> ());
+      default_settings)
   with
-  | Failure msg ->
-      Logs.info (fun m ->
-          m "Failed to load settings from %s: %s" !!settings msg);
-      None
-
-let load ?maturity ?include_env () =
-  match load_opt ?maturity ?include_env () with
-  | None -> default_settings
-  | Some settings -> settings
+  | Failure _ -> default_settings
 
 let save setting =
   let settings = !Semgrep_envvars.v.user_settings_file in

@@ -24,9 +24,7 @@ type rule_source = Rule_file of Fpath.t | Rules of Rule.t list
 type target_source = Target_file of Fpath.t | Targets of Target.t list
 [@@deriving show]
 
-(* This is essentially the flags for the semgrep-core program.
- * LATER: should delete or merge with osemgrep Scan_CLI.conf.
- *)
+(* TODO: similar to osemgrep Scan_CLI.conf; should be merged with it *)
 type t = {
   (* Debugging/profiling/logging flags *)
   log_to_file : Fpath.t option;
@@ -67,7 +65,8 @@ type t = {
    * processed. Note that this hook run in a child process of Parmap
    * in Run_semgrep, so the hook should not rely on shared memory!
    *)
-  file_match_hook : (Fpath.t -> Core_result.matches_single_file -> unit) option;
+  file_match_results_hook :
+    (Fpath.t -> Core_result.matches_single_file -> unit) option;
   (* Flag used by pysemgrep *)
   target_source : target_source option;
   (* Common.ml action for the -dump_xxx *)
@@ -127,7 +126,7 @@ let default =
     ncores = 1;
     (* a.k.a -fast, on by default *)
     filter_irrelevant_rules = true;
-    file_match_hook = None;
+    file_match_results_hook = None;
     (* Flag used by the semgrep-python wrapper *)
     target_source = None;
     (* Common.ml action for the -dump_xxx *)

@@ -26,15 +26,6 @@ module OutJ = Semgrep_output_v1_j
 (* Types *)
 (*****************************************************************************)
 
-(* coupling: semgrep_output_v1.atd matching_explanation_extra type *)
-type extra = {
-  (* only present for And kind *)
-  before_negation_matches : Pattern_match.t list option;
-  (* only present in nodes which have children Filter nodes *)
-  before_filter_matches : Pattern_match.t list option;
-}
-[@@deriving show]
-
 (* coupling: semgrep_output_v1.atd matching_explanation type *)
 type t = {
   op : OutJ.matching_operation;
@@ -43,7 +34,6 @@ type t = {
   matches : Pattern_match.t list;
   (* TODO: should be a range loc in the rule file *)
   pos : Rule.tok;
-  extra : extra option;
 }
 [@@deriving show]
 
@@ -58,7 +48,7 @@ let match_to_charpos_range (pm : Pattern_match.t) : string =
   spf "%d-%d" startp.OutJ.offset endp.OutJ.offset
 
 (* alt: use Format module *)
-let rec print_indent indent { op; children; matches; pos; extra = _ } =
+let rec print_indent indent { op; children; matches; pos } =
   let s =
     spf "%s op = %s (at %d), matches = %s" (Common2.n_space indent)
       (OutJ.show_matching_operation op)
@@ -72,10 +62,3 @@ let rec print_indent indent { op; children; matches; pos; extra = _ } =
 let print x =
   UConsole.print " Matching explanations:";
   print_indent 2 x
-
-(*****************************************************************************)
-(* Helpers *)
-(*****************************************************************************)
-
-let mk_extra ?before_negation_matches ?before_filter_matches () =
-  { before_negation_matches; before_filter_matches }

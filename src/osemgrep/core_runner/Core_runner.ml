@@ -1,4 +1,5 @@
 open Common
+module OutJ = Semgrep_output_v1_t
 module Env = Semgrep_envvars
 
 (*************************************************************************)
@@ -23,10 +24,8 @@ type conf = {
   max_memory_mb : int;
   timeout : float;
   timeout_threshold : int; (* output flags *)
-  (* features *)
   nosem : bool;
   strict : bool;
-  (* useful for debugging rules *)
   time_flag : bool;
   matching_explanations : bool;
   (* TODO: actually seems like semgrep-core always return them,
@@ -36,21 +35,15 @@ type conf = {
 }
 [@@deriving show]
 
-type pro_conf = {
-  diff_config : Differential_scan_config.t;
-  roots : Scanning_root.t list;
-  engine_type : Engine_type.t;
-}
-
 (* output *)
 (* LATER: ideally we should just return Core_result.t
    without the need for the intermediate Out.core_output.
 *)
 type result = {
   (* ocaml: not in original python implem, but just enough to get
-   * Cli_json_output.cli_output_of_core_results to work
+   * Semgrep_scan.cli_output_of_core_results to work
    *)
-  core : Semgrep_output_v1_t.core_output;
+  core : OutJ.core_output;
   hrules : Rule.hrules;
   scanned : Fpath.t Set_.t;
       (* in python implem *)
@@ -74,15 +67,17 @@ type result = {
    It doesn't scan the filesystem since it takes a list of target files,
    not scanning roots.
 *)
-type func = {
+type core_run_for_osemgrep = {
   run :
-    ?file_match_hook:(Fpath.t -> Core_result.matches_single_file -> unit) option ->
+    ?file_match_results_hook:
+      (Fpath.t -> Core_result.matches_single_file -> unit) option ->
     conf ->
-    (* TODO alt: pass a bool alongside each target path that indicates whether
+    (* alt: pass a bool alongside each target path that indicates whether
        the target is explicit i.e. occurs directly on the command line *)
     Find_targets.conf ->
-    (* LATER? alt: use Config_resolve.rules_and_origin instead? *)
-    Rule_error.rules_and_invalid ->
+    (* LATER? use Config_resolve.rules_and_origin instead? *)
+    Rule.rules ->
+    Rule.invalid_rule_error list ->
     (* Takes a list of target files, not scanning roots. *)
     Fpath.t list ->
     Core_result.result_or_exn;
@@ -104,7 +99,13 @@ type func = {
  * and executed by osemgrep-pro. When linked from osemgrep-pro, this
  * hook below will be set.
  *)
-let (hook_mk_pro_core_run_for_osemgrep : (pro_conf -> func) option ref) =
+let (hook_pro_core_run_for_osemgrep :
+      (?diff_config:Differential_scan_config.t ->
+      roots:Scanning_root.t list ->
+      Engine_type.t ->
+      core_run_for_osemgrep)
+      option
+      ref) =
   ref None
 
 (* This hooks into the proprietary part of Semgrep, in order to access a
@@ -112,7 +113,9 @@ let (hook_mk_pro_core_run_for_osemgrep : (pro_conf -> func) option ref) =
  * If a repo is checked out sparsely, this will only checkout the files
  * that are needed for the scan.
  *)
-let (hook_pro_git_remote_scan_setup : (func -> func) option ref) = ref None
+let (hook_pro_git_remote_scan_setup :
+      (core_run_for_osemgrep -> core_run_for_osemgrep) option ref) =
+  ref None
 
 (*************************************************************************)
 (* Extract mode *)
@@ -225,8 +228,8 @@ let core_scan_config_of_conf (conf : conf) : Core_scan_config.t =
    matching_explanations;
    nosem;
    strict;
-   time_flag;
    (* TODO *)
+   time_flag = _;
    dataflow_traces = _;
   } ->
       (* We default to Json because we do not want the current text
@@ -247,7 +250,6 @@ let core_scan_config_of_conf (conf : conf) : Core_scan_config.t =
         nosem;
         strict;
         version = Version.version;
-        report_time = time_flag;
       }
 
 let prepare_config_for_core_scan (config : Core_scan_config.t)
@@ -274,10 +276,11 @@ let prepare_config_for_core_scan (config : Core_scan_config.t)
     rule_source = Some (Rules rules);
   }
 
+(* Create the core result structure from the results *)
 (* LATER: we want to avoid this intermediate data structure but
  * for now that's what pysemgrep used to get so simpler to return it.
  *)
-let mk_result (all_rules : Rule.rule list) (res : Core_result.t) : result =
+let create_core_result (all_rules : Rule.rule list) (res : Core_result.t) =
   (* similar to Core_command.output_core_results code *)
   let scanned = res.scanned |> List_.map Target.internal_path |> Set_.of_list in
   let match_results = Core_json_output.core_output_of_matches_and_errors res in
@@ -298,11 +301,14 @@ let mk_result (all_rules : Rule.rule list) (res : Core_result.t) : result =
 (* Entry point *)
 (*************************************************************************)
 
-(* Core_scan.core_scan_func adapter for osemgrep *)
-let mk_core_run_for_osemgrep (core_scan_func : Core_scan.func) : func =
-  let run ?(file_match_hook = None) (conf : conf)
-      (targeting_conf : Find_targets.conf)
-      (rules_and_invalid : Rule_error.rules_and_invalid)
+(*
+   Take in rules and targets and return object with findings.
+*)
+let mk_core_run_for_osemgrep (core_scan_func : Core_scan.core_scan_func) :
+    core_run_for_osemgrep =
+  let run ?(file_match_results_hook = None) (conf : conf)
+      (targeting_conf : Find_targets.conf) (all_rules : Rule.t list)
+      (invalid_rules : Rule.invalid_rule_error list)
       (all_targets : Fpath.t list) : Core_result.result_or_exn =
     (*
        At this point, we already have the full list of targets. These targets
@@ -311,10 +317,9 @@ let mk_core_run_for_osemgrep (core_scan_func : Core_scan.func) : func =
        This mode doesn't tolerate scanning roots. This is checked in
        Core_scan.ml.
     *)
-    let rules, invalid_rules = rules_and_invalid in
-    let rule_errors = Core_scan.errors_of_invalid_rules invalid_rules in
+    let rule_errors = Core_scan.errors_of_invalid_rule_errors invalid_rules in
     let config : Core_scan_config.t = core_scan_config_of_conf conf in
-    let config = { config with file_match_hook } in
+    let config = { config with file_match_results_hook } in
     (* TODO: we should not need to use List_.map below, because
        Run_semgrep.semgrep_with_raw_results_and_exn_handler can accept
        a list of targets with different languages! We just
@@ -330,7 +335,9 @@ let mk_core_run_for_osemgrep (core_scan_func : Core_scan.func) : func =
        in use, bypassing it without removing it seems complicated.
        See https://www.notion.so/r2cdev/Osemgrep-scanning-algorithm-5962232bfd74433ba50f97c86bd1a0f3
     *)
-    let lang_jobs = split_jobs_by_language targeting_conf rules all_targets in
+    let lang_jobs =
+      split_jobs_by_language targeting_conf all_rules all_targets
+    in
     let rules_with_targets =
       List.concat_map (fun { Lang_job.rules; _ } -> rules) lang_jobs
       |> (* TODO: if this is using physical equality on purpose,
@@ -342,38 +349,42 @@ let mk_core_run_for_osemgrep (core_scan_func : Core_scan.func) : func =
           (fun ppf () ->
             (* TODO: validate if target is actually within a git repo and
                perhaps set respect_git_ignore to false otherwise *)
-            Status_report.pp_status ~num_rules:(List.length rules)
+            Status_report.pp_status ~num_rules:(List.length all_rules)
               ~num_targets:(List.length all_targets)
               ~respect_gitignore:targeting_conf.respect_gitignore lang_jobs ppf)
           ());
-    lang_jobs
-    |> List.iter (fun { Lang_job.xlang; _ } ->
-           Metrics_.add_feature "language" (Xlang.to_string xlang));
+    List.iter
+      (fun { Lang_job.xlang; _ } ->
+        Metrics_.add_feature "language" (Xlang.to_string xlang))
+      lang_jobs;
     let config = prepare_config_for_core_scan config lang_jobs in
 
     (* !!!!Finally! this is where we branch to semgrep-core core scan fun!!! *)
-    let/ res = core_scan_func config in
-    (* Reinject rule errors *)
-    let res =
-      {
-        res with
-        errors = rule_errors @ res.errors;
-        skipped_rules = invalid_rules @ res.skipped_rules;
-        rules_with_targets;
-      }
-    in
+    let result_or_exn = core_scan_func config in
+    match result_or_exn with
+    | Error _ -> result_or_exn
+    | Ok res ->
+        (* Reinject rule errors *)
+        let res =
+          {
+            res with
+            errors = rule_errors @ res.errors;
+            skipped_rules = invalid_rules @ res.skipped_rules;
+            rules_with_targets;
+          }
+        in
 
-    let scanned =
-      res.scanned |> List_.map Target.internal_path |> Set_.of_list
-    in
+        let scanned =
+          res.scanned |> List_.map Target.internal_path |> Set_.of_list
+        in
 
-    (* TODO(dinosaure): currently, we don't collect metrics when we invoke
-       semgrep-core but we should. However, if we implement a way to collect
-       metrics, we will just need to set [final_result.extra] to
-       [Core_result.Debug]/[Core_result.Time] and this line of code will not change. *)
-    Metrics_.add_max_memory_bytes res.profiling;
-    Metrics_.add_targets_stats scanned res.profiling;
-    Ok res
+        (* TODO(dinosaure): currently, we don't collect metrics when we invoke
+           semgrep-core but we should. However, if we implement a way to collect
+           metrics, we will just need to set [final_result.extra] to
+           [Core_result.Debug]/[Core_result.Time] and this line of code will not change. *)
+        Metrics_.add_max_memory_bytes res.profiling;
+        Metrics_.add_targets_stats scanned res.profiling;
+        Ok res
   in
   { run }
 [@@profiling]

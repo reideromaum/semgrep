@@ -241,7 +241,6 @@ let inspect_file_p (lang : Lang.t) path =
     | Bash
     | C
     | Cairo
-    | Circom
     | Clojure
     | Cpp
     | Csharp
@@ -302,4 +301,5 @@ let inspect_file lang path =
   let bool_res = inspect_file_p lang path in
   wrap_with_error_message lang path bool_res
 
-let inspect_files lang paths = Result_.partition (inspect_file lang) paths
+let inspect_files lang paths =
+  Result_.partition_result (inspect_file lang) paths

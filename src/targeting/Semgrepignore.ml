@@ -51,10 +51,6 @@ type exclusion_mechanism = Gitignore_and_semgrepignore | Only_semgrepignore
    The legacy built-in semgrepignore.
 
    It was copied from templates/.semgrepignore in the Python source.
-
-   Coupling:
-   If you modify this file, also modify:
-   OSS/cli/src/semgrep/templates/.semgrepignore
 *)
 let builtin_semgrepignore_for_semgrep_scan =
   {|
@@ -76,7 +72,6 @@ vendor/
 # Common test paths
 test/
 tests/
-testsuite/
 *_test.go
 
 # Semgrep rules folder

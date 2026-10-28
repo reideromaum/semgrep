@@ -13,19 +13,11 @@
  * license.txt for more details.
  *)
 
-(*****************************************************************************)
-(* Types *)
-(*****************************************************************************)
-
 type ('a, 'b) t = ('a, 'b) Either.t = Left of 'a | Right of 'b
 [@@deriving eq, show, sexp]
 
 type ('a, 'b, 'c) either3 = Left3 of 'a | Middle3 of 'b | Right3 of 'c
 [@@deriving eq, show]
-
-(*****************************************************************************)
-(* API *)
-(*****************************************************************************)
 
 (* If you don't want to use [@@deriving eq, show] above, you
  * can copy-paste manually the generated code by getting the
@@ -61,7 +53,7 @@ type ('a, 'b, 'c) either3 = Left3 of 'a | Middle3 of 'b | Right3 of 'c
  *        Format.fprintf fmt "@])")
  *)
 
-let partition f l =
+let partition_either f l =
   let rec part_either left right = function
     | [] -> (List.rev left, List.rev right)
     | x :: l -> (

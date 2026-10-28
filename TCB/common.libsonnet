@@ -1,7 +1,6 @@
 {
   exclude_paths: [
     'TCB/*',
-    //alt: 'Cap*.ml', or exclude in caller
     'tools/*',
     'scripts/*',
     'stats/*',

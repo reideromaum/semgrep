@@ -8,13 +8,11 @@ module Show = Show_CLI
 (*****************************************************************************)
 (* Prelude *)
 (*****************************************************************************)
-(* 'semgrep scan' command-line arguments processing.
- *
- * Translated partially from scan.py
- *
- * coupling: https://semgrep.dev/docs/cli-reference#semgrep-scan-command-options
- * updated automatically by update-help-command.yml in the semgrep-docs repo
- *)
+(*
+   'semgrep scan' command-line arguments processing.
+
+   Translated partially from scan.py
+*)
 
 (*****************************************************************************)
 (* Types and constants *)
@@ -42,7 +40,6 @@ type conf = {
   rewrite_rule_ids : bool;
   (* Engine selection *)
   engine_type : Engine_type.t;
-  autofix : bool;
   (* Performance options *)
   core_runner_conf : Core_runner.conf;
   (* file or URL (None means output to stdout) *)
@@ -80,7 +77,6 @@ let default : conf =
         severity = [];
         exclude_products = [];
       };
-    autofix = false;
     (* alt: could move in a Core_runner.default *)
     core_runner_conf =
       {
@@ -454,20 +450,17 @@ let o_trace : bool Term.t =
   H.negatable_flag [ "trace" ] ~neg_options:[ "no-trace" ]
     ~default:default.trace
     ~doc:
-      {|Record traces from Semgrep scans to help debugging. This feature is
-meant for internal use and may be changed or removed without warning.
+      {|Record traces from Semgrep scans to help debugging. This feature is meant for internal use and may be changed or removed without warning.
 |}
 
 let o_trace_endpoint : string option Term.t =
   let info =
     Arg.info [ "trace-endpoint" ]
-      ~env:(Cmd.Env.info "SEMGREP_OTEL_ENDPOINTS")
       ~doc:
-        {|Endpoint to send OpenTelemetry traces to, if `--trace` is present.
-The value may be `semgrep-prod` (default), `semgrep-dev`,
-`semgrep-local`, or any valid URL.  This feature is meant for
-internal use and may be changed or removed wihtout warning.
-|}
+        "Endpoint to send OpenTelemetry traces to, if `--trace` is present. \
+         The value may be `semgrep-prod` (default), `semgrep-dev`, \
+         `semgrep-local`, or any valid URL.  This feature is meant for \
+         internal use and may be changed or removed wihtout warning."
   in
   Arg.value (Arg.opt Arg.(some string) None info)
 
@@ -502,8 +495,7 @@ let o_json : bool Term.t =
 
 let o_incremental_output : bool Term.t =
   let info =
-    Arg.info [ "incremental-output" ]
-      ~doc:{|Output results incrementally. REQUIRES --experimental|}
+    Arg.info [ "incremental-output" ] ~doc:{|Output results incrementally.|}
   in
   Arg.value (Arg.flag info)
 
@@ -511,9 +503,7 @@ let o_incremental_output : bool Term.t =
 let o_files_with_matches : bool Term.t =
   let info =
     Arg.info [ "files-with-matches" ]
-      ~doc:
-        {|Output only the names of files containing matches.
-REQUIRES --experimental|}
+      ~doc:{|Output only the names of files containing matches|}
   in
   Arg.value (Arg.flag info)
 
@@ -636,20 +626,18 @@ let o_oss : bool Term.t =
   let info =
     Arg.info [ "oss-only" ]
       ~doc:
-        {|Run using only the OSS engine, even if the Semgrep Pro toggle is on.
-This may still run Pro rules, but only using the OSS features.
-|}
+        {|Run using only OSS features, even if the Semgrep Pro toggle is on.|}
   in
   Arg.value (Arg.flag info)
 
-let blurb_pro =
+let blurb =
   "Requires Semgrep Pro Engine. See https://semgrep.dev/products/pro-engine/ \
    for more."
 
 let o_pro_languages : bool Term.t =
   let info =
     Arg.info [ "pro-languages" ]
-      ~doc:("Enable Pro languages (currently Apex and Elixir). " ^ blurb_pro)
+      ~doc:("Enable Pro languages (currently Apex and Elixir). " ^ blurb)
   in
   Arg.value (Arg.flag info)
 
@@ -658,14 +646,7 @@ let o_pro_intrafile : bool Term.t =
     Arg.info [ "pro-intrafile" ]
       ~doc:
         ("Intra-file inter-procedural taint analysis. Implies --pro-languages. "
-       ^ blurb_pro)
-  in
-  Arg.value (Arg.flag info)
-
-let o_pro_path_sensitive : bool Term.t =
-  let info =
-    Arg.info [ "pro-path-sensitive" ]
-      ~doc:("Path sensitivity. Implies --pro-intrafile. " ^ blurb_pro)
+       ^ blurb)
   in
   Arg.value (Arg.flag info)
 
@@ -674,12 +655,12 @@ let o_pro : bool Term.t =
     Arg.info [ "pro" ]
       ~doc:
         ("Inter-file analysis and Pro languages (currently Apex and Elixir). "
-       ^ blurb_pro)
+       ^ blurb)
   in
   Arg.value (Arg.flag info)
 
 (* ------------------------------------------------------------------ *)
-(* Configuration options ('scan' only, not reused in 'ci') *)
+(* Configuration options *)
 (* ------------------------------------------------------------------ *)
 let o_config : string list Term.t =
   let info =
@@ -733,7 +714,7 @@ with --pattern. Only valid with a command-line specified pattern.
 
 let o_autofix : bool Term.t =
   H.negatable_flag [ "a"; "autofix" ] ~neg_options:[ "no-autofix" ]
-    ~default:default.autofix
+    ~default:default.output_conf.autofix
     ~doc:
       {|Apply autofix patches. WARNING: data loss can occur with this flag.
 Make sure your files are stored in a version control system. Note that
@@ -742,7 +723,7 @@ this mode is experimental and not guaranteed to function properly.
 
 let o_dryrun : bool Term.t =
   H.negatable_flag [ "dryrun" ] ~neg_options:[ "no-dryrun" ]
-    ~default:default.output_conf.fixed_lines
+    ~default:default.output_conf.dryrun
     ~doc:
       {|If --dryrun, does not write autofixes to a file. This will print the
 changes to the console. This lets you see the changes before you commit to
@@ -785,16 +766,6 @@ let o_exclude_rule_ids : string list Term.t =
       ~doc:{|Skip any rule with the given id. Can add multiple times.|}
   in
   Arg.value (Arg.opt_all Arg.string [] info)
-
-let o_exclude_minified_files : bool Term.t =
-  H.negatable_flag
-    [ "exclude-minified-files" ]
-    ~neg_options:[ "no-exclude-minified-files" ]
-    ~default:default.targeting_conf.exclude_minified_files
-    ~doc:
-      {|Skip minified files. These are files that are > 7% whitespace, or who
-        have a large number of bytes per line. By defualt minified files are
-   scanned |}
 
 (* ------------------------------------------------------------------ *)
 (* Alternate modes *)
@@ -898,7 +869,7 @@ let o_project_root : string option Term.t =
           forces a specific directory to be the project root. This is useful
           for testing or for restoring compatibility with older semgrep
           implementations that only looked for a .semgrepignore file
-          in the current directory. REQUIRES --experimental|}
+          in the current directory.|}
   in
   Arg.value (Arg.opt Arg.(some string) None info)
 
@@ -909,8 +880,7 @@ let o_remote : string option Term.t =
         {|Remote will quickly checkout and scan a remote git repository of
         the format "http[s]://<WEBSITE>/.../<REPO>.git". Must be run with
         --pro Incompatible with --project-root. Note this requires an empty
-        CWD as this command will clone the repository into the CWD.
-        REQUIRES --experimental|}
+        CWD as this command will clone the repository into the CWD|}
   in
   Arg.value (Arg.opt Arg.(some string) None info)
 
@@ -927,7 +897,6 @@ files before any rule-specific or language-specific filtering. Then exit.
 The output format is unspecified.
 THIS OPTION IS NOT PART OF THE SEMGREP API AND MAY
 CHANGE OR DISAPPEAR WITHOUT NOTICE.
-REQUIRES --experimental.
 |}
   in
   Arg.value (Arg.flag info)
@@ -989,27 +958,24 @@ let replace_target_roots_by_regular_files_where_needed (caps : < Cap.tmp >)
 (* Turn argv into a conf *)
 (*****************************************************************************)
 
-(* coupling: if you modify this function, you might need to modify
- * also Ci_CLI.scan_subset_cmdline_term
- *)
 let cmdline_term caps ~allow_empty_config : conf Term.t =
   (* !The parameters must be in alphabetic orders to match the order
    * of the corresponding '$ o_xx $' further below! *)
   let combine allow_untrusted_validators autofix baseline_commit common config
       dataflow_traces diff_depth dryrun dump_ast dump_command_for_core
-      dump_engine_path emacs emacs_outputs error exclude_ exclude_minified_files
-      exclude_rule_ids files_with_matches force_color gitlab_sast
-      gitlab_sast_outputs gitlab_secrets gitlab_secrets_outputs
-      _historical_secrets include_ incremental_output json json_outputs
-      junit_xml junit_xml_outputs lang ls matching_explanations
-      max_chars_per_line max_lines_per_finding max_memory_mb max_target_bytes
-      metrics num_jobs no_secrets_validation nosem optimizations oss output
-      pattern pro project_root pro_intrafile pro_lang pro_path_sensitive remote
-      replacement respect_gitignore rewrite_rule_ids sarif sarif_outputs
-      scan_unknown_extensions secrets severity show_supported_languages strict
-      target_roots test test_ignore_todo text text_outputs time_flag timeout
-      _timeout_interfileTODO timeout_threshold trace trace_endpoint
-      _use_osemgrep_sarif validate version version_check vim vim_outputs =
+      dump_engine_path emacs emacs_outputs error exclude_ exclude_rule_ids
+      files_with_matches force_color gitlab_sast gitlab_sast_outputs
+      gitlab_secrets gitlab_secrets_outputs _historical_secrets include_
+      incremental_output json json_outputs junit_xml junit_xml_outputs lang ls
+      matching_explanations max_chars_per_line max_lines_per_finding
+      max_memory_mb max_target_bytes metrics num_jobs no_secrets_validation
+      nosem optimizations oss output pattern pro project_root pro_intrafile
+      pro_lang remote replacement respect_gitignore rewrite_rule_ids sarif
+      sarif_outputs scan_unknown_extensions secrets severity
+      show_supported_languages strict target_roots test test_ignore_todo text
+      text_outputs time_flag timeout _timeout_interfileTODO timeout_threshold
+      trace trace_endpoint _use_osemgrep_sarif validate version version_check
+      vim vim_outputs =
     let target_roots, imply_always_select_explicit_targets =
       replace_target_roots_by_regular_files_where_needed caps
         ~experimental:(common.CLI_common.maturity =*= Maturity.Experimental)
@@ -1099,17 +1065,16 @@ let cmdline_term caps ~allow_empty_config : conf Term.t =
     in
     let output_conf : Output.conf =
       {
+        nosem;
+        autofix;
+        dryrun;
+        strict;
+        force_color;
+        show_dataflow_traces = dataflow_traces;
         output_format;
         max_chars_per_line;
         max_lines_per_finding;
-        force_color;
-        show_dataflow_traces = dataflow_traces;
-        strict;
-        fixed_lines = dryrun;
-        skipped_files =
-          (match common.logging_level with
-          | Some (Info | Debug) -> true
-          | _else_ -> false);
+        logging_level = common.logging_level;
       }
     in
 
@@ -1155,7 +1120,6 @@ let cmdline_term caps ~allow_empty_config : conf Term.t =
                 code_config;
                 secrets_config;
                 supply_chain_config;
-                path_sensitive = pro_path_sensitive;
               }
     in
     let explicit_analyzer = Option.map Xlang.of_string lang in
@@ -1234,7 +1198,6 @@ let cmdline_term caps ~allow_empty_config : conf Term.t =
           scan_unknown_extensions || imply_always_select_explicit_targets;
         explicit_targets;
         respect_gitignore;
-        exclude_minified_files;
       }
     in
     let rule_filtering_conf =
@@ -1325,7 +1288,6 @@ let cmdline_term caps ~allow_empty_config : conf Term.t =
               optimizations;
               ignore_todo = test_ignore_todo;
               common;
-              matching_diagnosis = false;
             }
       else None
     in
@@ -1358,7 +1320,6 @@ let cmdline_term caps ~allow_empty_config : conf Term.t =
       targeting_conf;
       core_runner_conf;
       error_on_findings = error;
-      autofix;
       metrics;
       version_check;
       output;
@@ -1384,8 +1345,8 @@ let cmdline_term caps ~allow_empty_config : conf Term.t =
     const combine $ o_allow_untrusted_validators $ o_autofix $ o_baseline_commit
     $ CLI_common.o_common $ o_config $ o_dataflow_traces $ o_diff_depth
     $ o_dryrun $ o_dump_ast $ o_dump_command_for_core $ o_dump_engine_path
-    $ o_emacs $ o_emacs_outputs $ o_error $ o_exclude $ o_exclude_minified_files
-    $ o_exclude_rule_ids $ o_files_with_matches $ o_force_color $ o_gitlab_sast
+    $ o_emacs $ o_emacs_outputs $ o_error $ o_exclude $ o_exclude_rule_ids
+    $ o_files_with_matches $ o_force_color $ o_gitlab_sast
     $ o_gitlab_sast_outputs $ o_gitlab_secrets $ o_gitlab_secrets_outputs
     $ o_historical_secrets $ o_include $ o_incremental_output $ o_json
     $ o_json_outputs $ o_junit_xml $ o_junit_xml_outputs $ o_lang $ o_ls
@@ -1393,13 +1354,13 @@ let cmdline_term caps ~allow_empty_config : conf Term.t =
     $ o_max_memory_mb $ o_max_target_bytes $ o_metrics $ o_num_jobs
     $ o_no_secrets_validation $ o_nosem $ o_optimizations $ o_oss $ o_output
     $ o_pattern $ o_pro $ o_project_root $ o_pro_intrafile $ o_pro_languages
-    $ o_pro_path_sensitive $ o_remote $ o_replacement $ o_respect_gitignore
-    $ o_rewrite_rule_ids $ o_sarif $ o_sarif_outputs $ o_scan_unknown_extensions
-    $ o_secrets $ o_severity $ o_show_supported_languages $ o_strict
-    $ o_target_roots $ o_test $ Test_CLI.o_test_ignore_todo $ o_text
-    $ o_text_outputs $ o_time $ o_timeout $ o_timeout_interfile
-    $ o_timeout_threshold $ o_trace $ o_trace_endpoint $ o_use_osemgrep_sarif
-    $ o_validate $ o_version $ o_version_check $ o_vim $ o_vim_outputs)
+    $ o_remote $ o_replacement $ o_respect_gitignore $ o_rewrite_rule_ids
+    $ o_sarif $ o_sarif_outputs $ o_scan_unknown_extensions $ o_secrets
+    $ o_severity $ o_show_supported_languages $ o_strict $ o_target_roots
+    $ o_test $ Test_CLI.o_test_ignore_todo $ o_text $ o_text_outputs $ o_time
+    $ o_timeout $ o_timeout_interfile $ o_timeout_threshold $ o_trace
+    $ o_trace_endpoint $ o_use_osemgrep_sarif $ o_validate $ o_version
+    $ o_version_check $ o_vim $ o_vim_outputs)
 
 let doc = "run semgrep rules on files"
 

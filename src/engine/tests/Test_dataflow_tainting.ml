@@ -38,12 +38,11 @@ let test_dfg_tainting rules_file file =
   let file = Fpath.v file in
   let lang = Lang.lang_of_filename_exn file in
   let rules =
-    match Parse_rule.parse rules_file with
-    | Ok rules -> rules
-    | Error e ->
+    try Parse_rule.parse rules_file with
+    | exn ->
         failwith
-          (spf "fail to parse tainting rules in %s (error: %s)" !!rules_file
-             (Rule_error.string_of_error e))
+          (spf "fail to parse tainting rules %s (exn = %s)" !!rules_file
+             (Common.exn_to_s exn))
   in
   let ast =
     try Parse_target.parse_and_resolve_name_warn_if_partial lang file with

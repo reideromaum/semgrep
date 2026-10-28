@@ -1,7 +1,6 @@
 import re
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Optional
 
 from semgrep.error import SemgrepError
 
@@ -41,7 +40,7 @@ class ParsedGolangVersion:
     """
 
     core: GolangVersionCore
-    pseudo: Optional[GolangPseudoVersion]
+    pseudo: GolangPseudoVersion | None
 
 
 def parse_golang_core(raw_core: str) -> GolangVersionCore:

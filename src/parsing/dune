@@ -7,7 +7,6 @@
  (libraries
    pcre
 
-   base
    commons
    git_wrapper
    paths

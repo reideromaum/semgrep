@@ -180,30 +180,26 @@ let dump_pattern (caps : < Cap.tmp >) (file : Fpath.t) =
   let lang = Xlang.lang_of_opt_xlang_exn !lang in
   E.try_with_log_exn_and_reraise file (fun () ->
       (* TODO? enable "semgrep.parsing" log level *)
-      match Parse_pattern.parse_pattern lang s with
-      | Ok any ->
-          let v = Meta_AST.vof_any any in
-          let s = dump_v_to_format v in
-          UCommon.pr s
-      | Error e -> Logs.app (fun m -> m "Parse error: %s" e))
+      let any = Parse_pattern.parse_pattern lang s in
+      let v = Meta_AST.vof_any any in
+      let s = dump_v_to_format v in
+      UCommon.pr s)
 [@@action]
 
 let dump_patterns_of_rule (caps : < Cap.tmp >) (file : Fpath.t) =
   let file = Core_scan.replace_named_pipe_by_regular_file caps file in
-  match Parse_rule.parse file with
-  | Ok rules ->
-      let xpats = List.concat_map Visit_rule.xpatterns_of_rule rules in
-      List.iter
-        (fun { Xpattern.pat; _ } ->
-          match pat with
-          | Sem (pat, _) ->
-              let v = Meta_AST.vof_any pat in
-              let s = dump_v_to_format v in
-              UCommon.pr s
-          | _ -> UCommon.pr (Xpattern.show_xpattern_kind pat))
-        xpats
-      (* TODO: handle better *)
-  | Error e -> failwith (Rule_error.string_of_error e)
+  let rules = Parse_rule.parse file in
+  let xpats = List.concat_map Rule.xpatterns_of_rule rules in
+  List.iter
+    (fun { Xpattern.pat; _ } ->
+      match pat with
+      | Sem (lazypat, _) ->
+          let any = Lazy.force lazypat in
+          let v = Meta_AST.vof_any any in
+          let s = dump_v_to_format v in
+          UCommon.pr s
+      | _ -> UCommon.pr (Xpattern.show_xpattern_kind pat))
+    xpats
 [@@action]
 
 let dump_ast ?(naming = false) (caps : < Cap.stdout ; Cap.exit ; Cap.tmp >)
@@ -266,7 +262,7 @@ let mk_config () =
     max_match_per_file = !max_match_per_file;
     ncores = !ncores;
     target_source = !target_source;
-    file_match_hook = None;
+    file_match_results_hook = None;
     action = !action;
     version = Version.version;
     roots = [] (* This will be set later in main () *);
@@ -396,6 +392,9 @@ let all_actions (caps : Cap.all_caps) () =
       " <file>",
       Arg_.mk_action_n_arg (fun xs ->
           Test_parsing.diff_pfff_tree_sitter (Fpath_.of_strings xs)) );
+    ( "-dump_contributions",
+      " dump on stdout the commit contributions in JSON",
+      Arg_.mk_action_0_arg Core_actions.dump_contributions );
     (* Misc stuff *)
     ( "-expr_at_range",
       " <l:c-l:c> <file>",
@@ -414,8 +413,8 @@ let all_actions (caps : Cap.all_caps) () =
     );
     ( "-stat_matches",
       " <marshalled file>",
-      Arg_.mk_action_1_conv Fpath.v
-        (Experiments.stat_matches (caps :> < Cap.stdout >)) );
+      Arg_.mk_action_1_arg (Experiments.stat_matches (caps :> < Cap.stdout >))
+    );
     ( "-ebnf_to_menhir",
       " <ebnf file>",
       Arg_.mk_action_1_conv Fpath.v
@@ -467,7 +466,7 @@ let all_actions (caps : Cap.all_caps) () =
 (* The options *)
 (*****************************************************************************)
 
-let options caps (actions : unit -> Arg_.cmdline_actions) =
+let options caps actions =
   [
     ( "-e",
       Arg.String (fun s -> pattern_string := Some s),
@@ -640,7 +639,7 @@ let options caps (actions : unit -> Arg_.cmdline_actions) =
       ( "-rpc",
         Arg.Unit
           (fun () ->
-            RPC.main (caps :> < Cap.exec ; Cap.tmp >);
+            RPC.main caps;
             Core_exit_code.(exit_semgrep caps#exit Success)),
         " don't use this unless you already know" );
     ]

@@ -44,8 +44,7 @@ let rec mark_first_instr_ancestor (cfg : IL.cfg) i =
   | Exit
   | NOther (Noop _)
   | NGoto _
-  | Join
-  | OtherJoin ->
+  | Join ->
       CFG.predecessors cfg i
       |> List.iter (fun (pred_i, _) -> mark_first_instr_ancestor cfg pred_i)
   (* Certain instruction nodes may be implicitly returned. *)

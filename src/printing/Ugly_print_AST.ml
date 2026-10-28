@@ -124,6 +124,8 @@ end
 (* Helpers *)
 (*****************************************************************************)
 
+let ( let/ ) = Result.bind
+
 (* Ok if and only if `f` returns `Ok for all elements. Short circuits when
  * the first `Error is encountered.
  *

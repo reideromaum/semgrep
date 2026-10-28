@@ -20,7 +20,6 @@ module E = Core_error
 module RP = Core_result
 module In = Input_to_core_t
 module TCM = Test_compare_matches
-module OutJ = Semgrep_output_v1_j
 
 (*****************************************************************************)
 (* Prelude *)
@@ -187,10 +186,8 @@ let check_parse_errors (rule_file : Fpath.t) (errors : Core_error.ErrorSet.t) :
 
 let read_rules_file ~get_xlang ?fail_callback rule_file =
   match Parse_rule.parse rule_file with
-  (* TODO: fail better with invalid rules? *)
-  | Error _ -> None
   (* TODO? sanity check rules |> List.iter Check_rule.check; *)
-  | Ok [] ->
+  | [] ->
       (match fail_callback with
       | None ->
           Logs.err (fun m ->
@@ -199,7 +196,7 @@ let read_rules_file ~get_xlang ?fail_callback rule_file =
           fail_callback 1
             (spf "file %s is empty or all rules were skipped" !!rule_file));
       None
-  | Ok rules ->
+  | rules ->
       let xlang = get_xlang rule_file rules in
       let target = find_target_of_yaml_file rule_file in
       Logs.info (fun m -> m "processing target %s" !!target);
@@ -240,6 +237,7 @@ let make_test_rule_file ?(fail_callback = fun _i m -> Alcotest.fail m)
         let xtarget = xtarget_of_file xlang target in
         let xconf = Match_env.default_xconfig in
 
+        E.g_errors := [];
         Core_profiling.profiling := true;
         let res =
           try
@@ -259,13 +257,14 @@ let make_test_rule_file ?(fail_callback = fun _i m -> Alcotest.fail m)
         Test_utils.compare_fixes ~file:target res.matches;
 
         check_profiling rule_file target res;
-        let actual_errors = res.matches |> List.map TCM.location_of_pm in
+        res.matches |> List.iter Core_json_output.match_to_push_error;
+        let actual_errors = !E.g_errors in
+        E.g_errors := [];
         actual_errors
-        |> List.iter (fun (_, line) ->
-               Logs.debug (fun m -> m "match at line: %d" line));
+        |> List.iter (fun e ->
+               Logs.debug (fun m -> m "found error: %s" (E.string_of_error e)));
         match
-          TCM.compare_actual_to_expected ~to_location:Fun.id actual_errors
-            expected_error_lines
+          TCM.compare_actual_to_expected actual_errors expected_error_lines
         with
         | Ok () -> ()
         | Error (num_errors, msg) ->

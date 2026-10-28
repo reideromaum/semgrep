@@ -104,7 +104,7 @@ type t = {
      hence the use of [Target.t list] now *)
   scanned : Target.t list;
   skipped_targets : Semgrep_output_v1_t.skipped_target list;
-  skipped_rules : Rule_error.invalid_rule list;
+  skipped_rules : Rule.invalid_rule_error list;
   rules_with_targets : Rule.rule list;
   profiling : Core_profiling.t option;
   explanations : Matching_explanation.t list option;
@@ -113,7 +113,11 @@ type t = {
 }
 [@@deriving show]
 
-type result_or_exn = (t, Exception.t) result
+(* ugly: the Core_error.t is used in Core_scan.sanity_check_invalid_patterns
+ * to remember some Out.PatternParseError that now happens later since
+ * we're parsing lazily the patterns in a rule.
+ *)
+type result_or_exn = (t, Exception.t * Core_error.t option) result
 
 (*****************************************************************************)
 (* Builders *)
@@ -133,7 +137,7 @@ let empty_match_result : Core_profiling.times match_result =
     explanations = [];
   }
 
-let mk_result_with_just_errors (errors : Core_error.t list) : t =
+let mk_final_result_with_just_errors (errors : Core_error.t list) : t =
   {
     errors;
     (* default values *)
@@ -259,9 +263,10 @@ let collate_rule_results (file : Fpath.t)
 (*****************************************************************************)
 
 (* Aggregate a list of target results into one final result *)
-let mk_result (results : Core_profiling.file_profiling match_result list)
+let make_final_result
+    (results : Core_profiling.file_profiling match_result list)
     (rules_with_engine : (Rule.t * Engine_kind.t) list)
-    (skipped_rules : Rule_error.invalid_rule list) (scanned : Target.t list)
+    (skipped_rules : Rule.invalid_rule_error list) (scanned : Target.t list)
     (interfile_languages_used : Xlang.t list) ~rules_parse_time : t =
   (* concatenating information from the match_result list *)
   let unprocessed_matches =

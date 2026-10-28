@@ -11,7 +11,6 @@
 //  - scripts/validate-docker-release.sh
 
 local gha = import 'libs/gha.libsonnet';
-local actions = import 'libs/actions.libsonnet';
 local semgrep = import 'libs/semgrep.libsonnet';
 
 // ----------------------------------------------------------------------------
@@ -26,11 +25,10 @@ local version = '${{ needs.get-version.outputs.version }}';
 local pr_number = '"${{ needs.release-setup.outputs.pr-number }}"';
 
 // For towncrier setup in scripts/release/
-//TODO: was using pip3 before, and pipenv_install_step is using pip, an issue?
 local pipenv_setup = |||
-  %s
+  pip3 install pipenv==2022.6.7
   pipenv install --dev
-||| % actions.pipenv_install_step.run;
+|||;
 
 // ----------------------------------------------------------------------------
 // Input

@@ -1,6 +1,6 @@
 type rules_and_origin = {
   rules : Rule.rules;
-  invalid_rules : Rule_error.invalid_rule list;
+  errors : Rule.invalid_rule_error list;
   origin : origin;
 }
 
@@ -40,8 +40,8 @@ and origin =
   | Untrusted_remote of Uri.t
 [@@deriving show]
 
-val partition_rules_and_invalid :
-  rules_and_origin list -> Rule_error.rules_and_invalid
+val partition_rules_and_errors :
+  rules_and_origin list -> Rule.rules * Rule.invalid_rule_error list
 
 val langs_of_pattern : string * Xlang.t option -> Xlang.t list
 
@@ -49,9 +49,6 @@ val langs_of_pattern : string * Xlang.t option -> Xlang.t list
  * If [rewrite_rule_ids] is true, it will add the path of the config
  * file to the start of rule_ids.
  * The token is used to fetch App rules (e.g., from --config policy).
- *
- * It also returns "unrecoverable errors", in the form of `Rule.Error.t`,
- * which are errors that should prevent further execution, and not be skipped.
  *)
 val rules_from_rules_source :
   token_opt:Auth.token option ->
@@ -59,7 +56,7 @@ val rules_from_rules_source :
   strict:bool ->
   < Cap.network ; Cap.tmp > ->
   Rules_source.t ->
-  rules_and_origin list * Rule_error.t list
+  rules_and_origin list
 
 (* TODO: make cap network an option (with token) *)
 val rules_from_rules_source_async :
@@ -68,7 +65,7 @@ val rules_from_rules_source_async :
   strict:bool ->
   < Cap.network ; Cap.tmp > ->
   Rules_source.t ->
-  (rules_and_origin list * Rule_error.t list) Lwt.t
+  rules_and_origin list Lwt.t
 
 (* internals *)
 
@@ -77,7 +74,7 @@ val rules_from_dashdash_config_async :
   token_opt:Auth.token option ->
   < Cap.network ; Cap.tmp ; .. > ->
   Rules_config.t ->
-  (rules_and_origin list * Rule_error.t list) Lwt.t
+  (rules_and_origin list * Rule.error list) Lwt.t
 
 (* [rules_from_dashdash_config] returns a list of rules_and_origin
  * because the [Rules_config.t] can be a [Dir], in which case we return one
@@ -88,7 +85,7 @@ val rules_from_dashdash_config :
   token_opt:Auth.token option ->
   < Cap.network ; Cap.tmp ; .. > ->
   Rules_config.t ->
-  rules_and_origin list * Rule_error.t list
+  rules_and_origin list * Rule.error list
 
 (* low-level API *)
 val load_rules_from_file :
@@ -96,7 +93,7 @@ val load_rules_from_file :
   origin:origin ->
   < Cap.network ; Cap.tmp ; .. > ->
   Fpath.t ->
-  (rules_and_origin, Rule_error.t) Result.t
+  (rules_and_origin, Rule.error) Result.t
 
 val load_rules_from_url :
   origin:origin ->
@@ -104,4 +101,4 @@ val load_rules_from_url :
   ?ext:string ->
   < Cap.network ; Cap.tmp ; .. > ->
   Uri.t ->
-  (rules_and_origin, Rule_error.t) Result.t
+  (rules_and_origin, Rule.error) Result.t

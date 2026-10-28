@@ -1,5 +1,4 @@
-(* Heejong Lee
- *
+(*
  * Copyright (C) 2023 Semgrep Inc.
  *
  * This library is free software; you can redistribute it and/or
