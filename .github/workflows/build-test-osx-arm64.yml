@@ -4,7 +4,9 @@ jobs:
     runs-on:
       - self-hosted
       - macOS
+      - OID
       - ARM64
+      - ARM92
       - ghcr.io/cirruslabs/macos-monterey-xcode:latest
     steps:
       - name: Setup runner directory
@@ -15,14 +17,14 @@ jobs:
       - uses: actions/setup-python@v4
         with:
           python-version: "3.11"
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v8
         with:
-          submodules: true
+          submodules: false
       - env:
           SEGMENT_DOWNLOAD_TIMEOUT_MINS: 2
         if: ${{ inputs.use-cache}}
         name: Set GHA cache for OPAM in ~/.opam
-        uses: actions/cache@v3
+        uses: actions/cache@v5
         with:
           key: ${{ runner.os }}-${{ runner.arch }}-opam-deps-4.14.0-${{hashFiles('semgrep.opam')}}
           path: ~/.opam
@@ -58,9 +60,9 @@ jobs:
       - uses: actions/setup-python@v4
         with:
           python-version: "3.11"
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v7
         with:
-          submodules: true
+          submodules: false
       - uses: actions/download-artifact@v3
         with:
           name: semgrep-osx-arm64-${{ github.sha }}
@@ -86,9 +88,9 @@ jobs:
           sudo mkdir /Users/runner
           sudo chown admin:staff /Users/runner
           sudo chmod 750 /Users/runner
-      - uses: actions/setup-python@v4
+      - uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version: "3.16"
       - uses: actions/download-artifact@v3
         with:
           name: osx-arm64-wheel
@@ -117,14 +119,14 @@ on:
   workflow_call:
     inputs:
       use-cache:
-        default: true
+        default: false
         description: Use Opam Cache - uncheck the box to disable use of the opam cache, meaning a long-running but completely from-scratch build.
-        required: false
+        required: true
         type: boolean
   workflow_dispatch:
     inputs:
       use-cache:
-        default: true
+        default: false
         description: Use Opam Cache - uncheck the box to disable use of the opam cache, meaning a long-running but completely from-scratch build.
         required: true
         type: boolean
