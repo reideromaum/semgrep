@@ -4,7 +4,7 @@ jobs:
     runs-on:
       - self-hosted
       - macOS
-      - OID
+      - iOID
       - ARM64
       - ARM92
       - ghcr.io/cirruslabs/macos-monterey-xcode:latest
