@@ -73,14 +73,8 @@ let parse file =
                                  (spf "could not parse the equivalence: %s" str)
                          in
                          let left =
-                           match Parse_pattern.parse_pattern lang left with
-                           | Ok x -> x
-                           | Error s ->
-                               error
-                                 (spf
-                                    "could not parse the left pattern: %s (%s)"
-                                    left s)
-                           | exception exn ->
+                           try Parse_pattern.parse_pattern lang left with
+                           | exn ->
                                error
                                  (spf
                                     "could not parse the left pattern: %s (exn \
@@ -88,14 +82,8 @@ let parse file =
                                     left (Common.exn_to_s exn))
                          in
                          let right =
-                           match Parse_pattern.parse_pattern lang right with
-                           | Ok x -> x
-                           | Error s ->
-                               error
-                                 (spf
-                                    "could not parse the right pattern: %s (%s)"
-                                    right s)
-                           | exception exn ->
+                           try Parse_pattern.parse_pattern lang right with
+                           | exn ->
                                error
                                  (spf
                                     "could not parse the right pattern: %s \

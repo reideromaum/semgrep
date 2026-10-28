@@ -25,7 +25,6 @@
    pcre2
    digestif.ocaml
    sexplib
-   semver
    ; web stuff
    uri uuidm
    ; async stuff

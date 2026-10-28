@@ -43,6 +43,7 @@
  * use this function.
  *)
 let reset () =
+  Core_error.g_errors := [];
   Core_profiling.profiling := false;
   Rule.last_matched_rule := None;
   Pro_hooks.reset_pro_hooks ();

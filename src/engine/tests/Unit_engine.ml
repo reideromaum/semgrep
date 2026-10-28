@@ -215,7 +215,6 @@ let language_exceptions =
     (Lang.Kotlin, [ "dots_stmts"; "metavar_equality_var" ]);
     (* good boy *)
     (Lang.Rust, []);
-    (Lang.Move_on_aptos, [ "metavar_key_value"; "regexp_string" ]);
     (* Experimental languages *)
 
     (* TODO: dots_nested_stmts to fix for C and C++ *)
@@ -283,7 +282,6 @@ let maturity_tests () =
       make_maturity_tests Lang.Hack "hack" ".hack" Beta;
       make_maturity_tests Lang.Kotlin "kotlin" ".kt" Beta;
       make_maturity_tests Lang.Rust "rust" ".rs" Beta;
-      make_maturity_tests Lang.Move_on_aptos "move_on_aptos" ".move" Beta;
       (* Terraform/HCL has too many NA, not worth it *)
 
       (* Experimental *)
@@ -313,13 +311,8 @@ let maturity_tests () =
 let match_pattern ~lang ~hook ~file ~pattern ~fix =
   (* TODO? enable the "semgrep.parsing" src level maybe here *)
   let pattern =
-    match Parse_pattern.parse_pattern lang pattern with
-    | Ok pat -> pat
-    | Error s ->
-        failwith
-          (spf "fail to parse pattern `%s` with lang = %s: %s" pattern
-             (Lang.to_string lang) s)
-    | exception exn ->
+    try Parse_pattern.parse_pattern lang pattern with
+    | exn ->
         failwith
           (spf "fail to parse pattern `%s` with lang = %s (exn = %s)" pattern
              (Lang.to_string lang) (Common.exn_to_s exn))
@@ -387,15 +380,18 @@ let regression_tests_for_lang ~polyglot_pattern_path files lang =
                 *     (Filename.concat data_path "basic_equivalences.yml")
                 * else []
              *)
-             let matches = ref [] in
              match_pattern ~lang
-               ~hook:(fun pm -> Stack_.push (TCM.location_of_pm pm) matches)
+               ~hook:(fun { Pattern_match.range_loc; _ } ->
+                 let start_loc, _end_loc = range_loc in
+                 E.push_error
+                   (Rule_ID.of_string_exn "test-pattern")
+                   start_loc "" OutJ.SemgrepMatchFound)
                ~file ~pattern ~fix:NoFix
              |> ignore;
-             let actual = !matches in
+             let actual = !E.g_errors in
+             E.g_errors := [];
              let expected = TCM.expected_error_lines_of_files [ file ] in
-             TCM.compare_actual_to_expected_for_alcotest ~to_location:Fun.id
-               actual expected))
+             TCM.compare_actual_to_expected_for_alcotest actual expected))
 
 let make_lang_regression_tests ~test_pattern_path ~polyglot_pattern_path
     lang_data =
@@ -494,8 +490,18 @@ let autofix_tests_for_lang ~polyglot_pattern_path files lang =
              in
 
              let matches =
-               match_pattern ~lang ~hook:(fun _ -> ()) ~file ~pattern ~fix
+               match_pattern ~lang
+                 ~hook:(fun { Pattern_match.range_loc; _ } ->
+                   let start_loc, _end_loc = range_loc in
+                   (* TODO? needed? we don't seem to use it,
+                    * maybe left because of copy-pasta?
+                    *)
+                   E.push_error
+                     (Rule_ID.of_string_exn "test-pattern")
+                     start_loc "" OutJ.SemgrepMatchFound)
+                 ~file ~pattern ~fix
              in
+             E.g_errors := [];
              match fix with
              | NoFix -> ()
              | _ ->
@@ -527,7 +533,7 @@ let eval_regression_tests () =
                Alcotest.(check bool)
                  (spf "%s should evaluate to true" file)
                  true
-                 (Eval_generic.Bool true =*= res)));
+                 (Eval_generic_partial.Bool true =*= res)));
   ]
 
 (*****************************************************************************)
@@ -536,8 +542,7 @@ let eval_regression_tests () =
 
 let test_irrelevant_rule rule_file target_file =
   let cache = Some (Hashtbl.create 101) in
-  (* TODO: fail more gracefully for invalid rules? *)
-  let rules = Parse_rule.parse rule_file |> Result.get_ok in
+  let rules = Parse_rule.parse rule_file in
   rules
   |> List.iter (fun rule ->
          match Analyze_rule.regexp_prefilter_of_rule ~cache rule with
@@ -591,14 +596,13 @@ let filter_irrelevant_rules_tests () =
 (* Tainting tests *)
 (*****************************************************************************)
 
-let tainting_test (lang : Lang.t) (rules_file : Fpath.t) (file : Fpath.t) =
+let tainting_test lang rules_file file =
   let rules =
-    match Parse_rule.parse rules_file with
-    | Ok rules -> rules
-    | Error e ->
+    try Parse_rule.parse rules_file with
+    | exn ->
         failwith
-          (spf "fail to parse tainting rules %s (error = %s)" !!rules_file
-             (Rule_error.string_of_error e))
+          (spf "fail to parse tainting rules %s (exn = %s)" !!rules_file
+             (Common.exn_to_s exn))
   in
   let ast =
     try Parse_target.parse_and_resolve_name_warn_if_partial lang file with
@@ -649,19 +653,17 @@ let tainting_test (lang : Lang.t) (rules_file : Fpath.t) (file : Fpath.t) =
   in
   let actual =
     matches
-    |> List_.map (fun (m : P.t) ->
-           E.
-             {
-               rule_id = Some m.rule_id.id;
-               typ = OutJ.SemgrepMatchFound;
-               loc = fst m.range_loc;
-               msg = m.rule_id.message;
-               details = None;
-             })
+    |> List_.map (fun m ->
+           {
+             rule_id = Some m.P.rule_id.id;
+             E.typ = OutJ.SemgrepMatchFound;
+             loc = fst m.range_loc;
+             msg = m.P.rule_id.message;
+             details = None;
+           })
   in
   let expected = TCM.expected_error_lines_of_files [ file ] in
-  TCM.compare_actual_to_expected_for_alcotest
-    ~to_location:TCM.location_of_core_error actual expected
+  TCM.compare_actual_to_expected_for_alcotest actual expected
 
 let tainting_tests_for_lang files lang =
   files
@@ -783,9 +785,7 @@ let mark_todo_js (test : Testo.t) =
     when (* The target file has an unsupported .erb extension, making it excluded
             correctly by the OCaml test suite but not by the JS test suite
             (or something close to this). *)
-         s =~ ".*/ruby/rails/security/brakeman/check-reverse-tabnabbing.yaml"
-         || (* Not sure why this fails *)
-         s =~ ".*/ruby/lang/security/divide-by-zero.yaml" ->
+         s =~ ".*/ruby/rails/security/brakeman/check-reverse-tabnabbing.yaml" ->
       Testo.update test ~tags:(Test_tags.todo_js :: test.tags)
   | _ -> test
 

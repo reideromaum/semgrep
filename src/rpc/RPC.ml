@@ -1,24 +1,13 @@
 open Common
 open Semgrep_output_v1_j
-module Out = Semgrep_output_v1_j
-
-(*****************************************************************************)
-(* Prelude *)
-(*****************************************************************************)
-
-(*****************************************************************************)
-(* Types *)
-(*****************************************************************************)
 
 exception InvalidRPCArgument of string
 
-(*****************************************************************************)
-(* The answer to the call from Python *)
-(*****************************************************************************)
+let ( let* ) = Result.bind
 
 (* Once we get some more RPC calls we should probably move this to a different
  * file. But it seems fine for now. *)
-let handle_autofix (dryrun : bool) (edits : edit list) =
+let handle_autofix dryrun edits =
   let edits =
     edits
     |> List_.map (fun { path; start_offset; end_offset; replacement_text } ->
@@ -91,15 +80,8 @@ let handle_sarif_format caps hide_nudge engine_label show_dataflow_traces
   in
   (output, format_time_seconds)
 
-let handle_contributions (caps : < Cap.exec >) : Out.contributions =
-  Parse_contribution.get_contributions caps
-
-(*****************************************************************************)
-(* Dispatcher *)
-(*****************************************************************************)
-
-let handle_call (caps : < Cap.exec ; Cap.tmp >) :
-    function_call -> (function_return, string) result = function
+let handle_call caps : function_call -> (function_return, string) result =
+  function
   | `CallApplyFixes { dryrun; edits } ->
       let modified_file_count, fixed_lines = handle_autofix dryrun edits in
       Ok (`RetApplyFixes { modified_file_count; fixed_lines })
@@ -134,20 +116,13 @@ let handle_call (caps : < Cap.exec ; Cap.tmp >) :
       raise
         (InvalidRPCArgument
            "The field show_dataflow_traces must be populated in CallSarifFormat")
-  | `CallContributions ->
-      let contribs = handle_contributions (caps :> < Cap.exec >) in
-      Ok (`RetContributions contribs)
-
-(*****************************************************************************)
-(* Helpers *)
-(*****************************************************************************)
 
 let read_packet chan =
-  let/ size_str =
+  let* size_str =
     try Ok (input_line chan) with
     | End_of_file -> Error "Reached EOF while reading RPC request header"
   in
-  let/ size =
+  let* size =
     match int_of_string_opt size_str with
     | Some i -> Ok i
     | None ->
@@ -169,10 +144,10 @@ let write_packet chan str =
 
 (* Blocks until a request comes in, then handles it and sends the result back.
  * *)
-let handle_single_request (caps : < Cap.exec ; Cap.tmp >) =
+let handle_single_request caps () =
   let res =
-    let/ call_str = read_packet stdin in
-    let/ call =
+    let* call_str = read_packet stdin in
+    let* call =
       try Ok (Semgrep_output_v1_j.function_call_of_string call_str) with
       (* It's not immediately clear what exceptions `function_call_of_string`
        * could raise on bad input. So let's be cautious and just handle
@@ -196,14 +171,10 @@ let handle_single_request (caps : < Cap.exec ; Cap.tmp >) =
   let res_str = Semgrep_output_v1_j.string_of_function_return func_return in
   write_packet stdout res_str
 
-(*****************************************************************************)
-(* Entry point *)
-(*****************************************************************************)
-
-let main (caps : < Cap.exec ; Cap.tmp >) =
-  (* For some requests, such as SARIF formatting, we need to parse rules
+let main caps =
+  (* For some requests, such as SARIF formatting, need to parse rules
    * so we need to init the parsers as well. *)
   Parsing_init.init ();
 
   (* For now, just handle one request and then exit. *)
-  handle_single_request caps
+  handle_single_request caps ()

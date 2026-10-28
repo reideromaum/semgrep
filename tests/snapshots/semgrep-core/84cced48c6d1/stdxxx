@@ -20,10 +20,8 @@ Initialized empty Git repository in <TMP>/<MASKED>/.git/
 └─────────────┘
 
 [<MASKED TIMESTAMP>][INFO]: Loading settings from nosettings.yaml
-[<MASKED TIMESTAMP>][INFO]: Settings file 'nosettings.yaml' does not exist or is not a regular file
 [<MASKED TIMESTAMP>][INFO]: Running external command: 'git' 'ls-remote' '--get-url'
-[<MASKED TIMESTAMP>][INFO]: error output: fatal: No remote configured to list refs from.
-
+fatal: No remote configured to list refs from.
 [32m✔[39m [1mSemgrep OSS[0m
   [32m✔[39m Basic security coverage for first-party code vulnerabilities.
 
@@ -101,7 +99,7 @@ Files skipped:
 
    • <none>
 
-  Skipped by limiting to files smaller than -1 bytes:
+  Skipped by limiting to files smaller than 1000000 bytes:
   (Adjust with the --max-target-bytes flag)
 
    • <none>

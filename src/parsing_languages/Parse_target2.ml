@@ -61,7 +61,14 @@ let just_parse_with_lang lang file : Parsing_result2.t =
         stat = Parsing_stat.default_stat !!file;
       }
   (* Menhir and Tree-sitter *)
-  | Lang.C
+  | Lang.C ->
+      run file
+        [
+          (* this internally uses the CST for C++ *)
+          Pfff (throw_tokens Parse_c.parse);
+          TreeSitter Parse_c_tree_sitter.parse;
+        ]
+        C_to_generic.program
   | Lang.Cpp ->
       run file
         [
@@ -224,8 +231,6 @@ let just_parse_with_lang lang file : Parsing_result2.t =
   | Lang.R -> run file [ TreeSitter Parse_r_tree_sitter.parse ] (fun x -> x)
   | Lang.Move_on_aptos ->
       run file [ TreeSitter Parse_move_on_aptos_tree_sitter.parse ] (fun x -> x)
-  | Lang.Circom ->
-      run file [ TreeSitter Parse_circom_tree_sitter.parse ] (fun x -> x)
   (* External proprietary parsers. The parsers need to register themselves
    * for parsing to take place.
    *)

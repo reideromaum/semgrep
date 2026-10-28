@@ -15,32 +15,29 @@ module Cmd = Cmdliner.Cmd
 type conf = { common : CLI_common.conf } [@@deriving show]
 
 (*****************************************************************************)
-(* Cmdline flags *)
+(* Logout subcommand *)
 (*****************************************************************************)
 
-(*****************************************************************************)
-(* Turn argv into a conf *)
-(*****************************************************************************)
+let logout_doc = "Remove locally stored credentials to semgrep.dev"
 
-let cmdline_term : conf Term.t =
-  let combine common = { common } in
-  Term.(const combine $ CLI_common.o_common)
-
-let doc = "Remove locally stored credentials to semgrep.dev"
-
-let man : Cmdliner.Manpage.block list =
+let logout_man : Cmdliner.Manpage.block list =
   [
     `S Cmdliner.Manpage.s_description;
     `P "Remove locally stored credentials to semgrep.dev";
   ]
   @ CLI_common.help_page_bottom
 
-let cmdline_info : Cmd.info = Cmd.info "semgrep logout" ~doc ~man
+let logout_cmdline_info : Cmd.info =
+  Cmd.info "semgrep logout" ~doc:logout_doc ~man:logout_man
 
 (*****************************************************************************)
-(* Entry point *)
+(* Turn argv into a conf *)
 (*****************************************************************************)
 
-let parse_argv (argv : string array) : conf =
-  let cmd : conf Cmd.t = Cmd.v cmdline_info cmdline_term in
+let term =
+  let combine common = { common } in
+  Term.(const combine $ CLI_common.o_common)
+
+let parse_argv (cmd_info : Cmd.info) (argv : string array) : conf =
+  let cmd : conf Cmd.t = Cmd.v cmd_info term in
   CLI_common.eval_value ~argv cmd

@@ -493,7 +493,6 @@ class GithubMeta(GitMeta):
                 req = requests.get(
                     f"{self.api_url}/repos/{self.repo_name}/compare/{self.base_branch_hash}...{self.head_branch_hash}",
                     headers=headers,
-                    timeout=3,
                 )
                 if req.status_code == 200:
                     compare_json = json.loads(req.text)
@@ -1185,13 +1184,6 @@ class TravisMeta(GitMeta):
         return res
 
 
-@dataclass
-class SemgrepManagedScanMeta(GitMeta):
-    """Gather metadata from Semgrep Managed Scanning."""
-
-    environment: str = field(default="semgrep-managed-scan", init=False)
-
-
 def generate_meta_from_environment(
     baseline_ref: Optional[str], subdir: Optional[Path]
 ) -> GitMeta:
@@ -1227,9 +1219,6 @@ def generate_meta_from_environment(
     # https://docs.travis-ci.com/user/environment-variables/
     elif os.getenv("TRAVIS") == "true":
         return TravisMeta(baseline_ref)
-
-    elif os.getenv("SEMGREP_MANAGED_SCAN") == "true":
-        return SemgrepManagedScanMeta(baseline_ref)
 
     else:
         return GitMeta(baseline_ref, subdir)

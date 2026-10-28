@@ -156,7 +156,7 @@ local action_lint_job = {
   ],
 };
 
-local jsonnet_gha_job(dir=".github/workflows") = {
+local jsonnet_gha_job = {
   'runs-on': 'ubuntu-latest',
   steps: [
     actions.checkout(),
@@ -167,11 +167,11 @@ local jsonnet_gha_job(dir=".github/workflows") = {
       run: |||
         sudo apt-get update
         sudo apt-get install jsonnet
-        cd %s
+        cd .github/workflows
         make clean
         make
         git diff --exit-code
-      ||| % dir,
+      |||,
     },
   ],
 };
@@ -188,7 +188,7 @@ local jsonnet_gha_job(dir=".github/workflows") = {
     'pre-commit-manual': pre_commit_manual_job,
     'pre-commit-ocaml': pre_commit_ocaml_job(),
     'github-actions': action_lint_job,
-    'jsonnet-gha': jsonnet_gha_job(),
+    'jsonnet-gha': jsonnet_gha_job,
   },
   export::{
     // reused in semgrep-pro

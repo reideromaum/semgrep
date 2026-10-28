@@ -12,7 +12,7 @@ jobs:
         with:
           cache: pipenv
           python-version: "3.8"
-      - run: pip install pipenv==2024.0.1
+      - run: pip install pipenv==2022.6.7
       - uses: actions/download-artifact@v3
         with:
           name: semgrep-core-x86-artifact
@@ -82,6 +82,11 @@ jobs:
       file: Dockerfile
       repository-name: semgrep/semgrep
       target: performance-tests
+  build-test-javascript:
+    secrets: inherit
+    uses: ./.github/workflows/build-test-javascript.yml
+    with:
+      upload-artifacts: ${{ (github.ref == 'refs/heads/develop') || startsWith(github.head_ref, 'release-') || (!github.event.pull_request.head.repo.fork && contains(github.event.pull_request.labels.*.name, 'publish-js')) }}
   build-test-manylinux-aarch64:
     needs:
       - build-test-docker
@@ -124,7 +129,7 @@ jobs:
         with:
           cache: pipenv
           python-version: ${{ matrix.python }}
-      - run: pip install pipenv==2024.0.1
+      - run: pip install pipenv==2022.6.7
       - name: Install Python dependencies
         run: pipenv install --dev
         working-directory: cli
@@ -217,8 +222,7 @@ jobs:
           make copy-core-for-cli
       - name: Install Python dependencies
         run: |
-          apk add --no-cache python3
-          pip install --no-cache-dir --ignore-installed distlib pipenv==2024.0.1
+          make install-deps-ALPINE-for-pysemgrep
           (cd cli; pipenv install --dev)
       - name: Run pytest for osemgrep known passing tests
         run: |
@@ -238,7 +242,7 @@ jobs:
         with:
           cache: pipenv
           python-version: "3.11"
-      - run: pip install pipenv==2024.0.1
+      - run: pip install pipenv==2022.6.7
       - uses: actions/download-artifact@v3
         with:
           name: semgrep-core-x86-artifact
@@ -292,7 +296,7 @@ jobs:
         name: Set GHA cache for OPAM in ~/.opam
         uses: actions/cache@v3
         with:
-          key: ${{ runner.os }}-${{ runner.arch }}-v1-opam-4.14.0-${{hashFiles('semgrep.opam')}}
+          key: ${{ runner.os }}-${{ runner.arch }}-opam-deps-4.14.0-${{hashFiles('semgrep.opam')}}
           path: ~/.opam
       - name: Install dependencies
         run: |

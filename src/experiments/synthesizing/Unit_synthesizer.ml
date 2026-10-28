@@ -205,12 +205,7 @@ let tests =
                       let check_pats (str, pat) =
                         try
                           (* the pattern AST *)
-                          let pattern =
-                            match Parse_pattern.parse_pattern lang pat with
-                            | Ok pat -> pat
-                            | Error s ->
-                                failwith (spf "problem parsing %s: %s" pat s)
-                          in
+                          let pattern = Parse_pattern.parse_pattern lang pat in
 
                           (* extracting the code at the range *)
                           let e_opt = Range_to_AST.any_at_range_first r ast in

@@ -885,7 +885,7 @@ let unarg arg =
 
 let unargs xs =
   uncomma xs
-  |> Either_.partition (function
+  |> Either_.partition_either (function
        | Arg e -> Left e
        | ArgRef (_, e)
        | ArgUnpack (_, e)

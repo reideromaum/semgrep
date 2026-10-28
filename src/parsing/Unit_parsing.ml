@@ -117,7 +117,6 @@ let lang_parsing_tests () =
       pack_parsing_tests_for_lang Lang.Dockerfile "dockerfile" ".dockerfile";
       pack_parsing_tests_for_lang Lang.Lua "lua" ".lua";
       pack_parsing_tests_for_lang Lang.Move_on_aptos "move_on_aptos" ".move";
-      pack_parsing_tests_for_lang Lang.Circom "circom" ".circom";
       pack_parsing_tests_for_lang Lang.Rust "rust" ".rs";
       pack_parsing_tests_for_lang Lang.Cairo "cairo" ".cairo";
       pack_parsing_tests_for_lang Lang.Swift "swift" ".swift";
@@ -167,21 +166,11 @@ let lang_parsing_tests () =
  *)
 let parsing_error_tests () =
   let dir = tests_path / "parsing_errors" in
-  let tags_of_file file =
-    match Fpath.to_string file with
-    (* For some reason, we can get a `Parsing_error.Syntax_error
-       from this test in JS, despite the fact that the `try` makes this
-       blatantly impossible.
-       I suspect a `jsoo` bug.
-    *)
-    | file when file =~ ".*/foo.c" -> [ Test_tags.todo_js ]
-    | _ -> []
-  in
   Testo.categorize "Parsing error detection"
     (let tests = Common2.glob (spf "%s/*" !!dir) in
      tests |> Fpath_.of_strings
      |> List_.map (fun file ->
-            t ~tags:(tags_of_file file) (Fpath.basename file) (fun () ->
+            t (Fpath.basename file) (fun () ->
                 try
                   let lang = Lang.lang_of_filename_exn file in
                   let res = Parse_target.just_parse_with_lang lang file in
